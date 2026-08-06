@@ -1,67 +1,55 @@
 """The bake pipeline — the one place that drives a Builder + Publishers through a recipe.
 
-``bake(ctx, bake_id)`` is the arq task; ``run_bake_inline(bake_id)`` runs the *same*
-pipeline synchronously with an in-memory event sink (for the CLI and tests — no arq, no
-Redis). Both call the shared coroutine :func:`_run_pipeline`.
+The pipeline core :func:`run_pipeline` is **synchronous** and must run on a process's
+*main thread*: pyinfra runs on gevent, whose child watchers only exist on the default
+(main-thread) hub, so running a phase in a worker thread fails with
+``child watchers are only available on the default loop``. Two callers respect that:
 
-Builders, publishers and ``run_phase`` are all **synchronous** and can block for minutes,
-so every one of those calls is dispatched through :func:`asyncio.to_thread`, keeping the
-event loop free (and giving arq's ``Job.abort`` a cancellation point at each ``await``).
+  * ``run_bake_inline(bake_id)`` (CLI / tests) runs it directly on the caller's main
+    thread with an in-memory sink — no arq, no Redis.
+  * ``bake(ctx, bake_id)`` (the arq task) runs it in an isolated **subprocess**
+    (``python -m chef.worker.entry <bake_id>``), which owns *its* main thread. That also
+    makes ``Job.abort`` a clean process-kill, and keeps one heavy gevent world per bake.
 
-Events (``chef.events`` dicts) are handed to an ``emit`` callable:
-
-  * the arq task's ``emit`` ``XADD``s each event onto Redis Stream ``chef:bake:{id}:log``
-    (a plain synchronous redis client — safe to call from the worker threads);
-  * the inline helper's ``emit`` just appends to a list.
-
-Structured ``step`` events are additionally mirrored into ``store.record_step`` so the
-durable step list survives past the Redis stream's TTL.
+Events (``chef.events`` dicts) are handed to an ``emit`` callable: the subprocess/CLI wire
+it to Redis (``XADD`` onto ``chef:bake:{id}:log``) or to a list. Structured ``step`` events
+are additionally mirrored into ``store.record_step`` for a durable step list.
 """
 
 from __future__ import annotations
 
 import asyncio
 import json
+import sys
 import uuid
 from collections.abc import Callable
 
 import redis
 
+from chef import store
 from chef.builders import get_builder
 from chef.config import get_settings
+from chef.engine.pyinfra_runner import run_phase
 from chef.engine.recipe import load_recipe
 from chef.events import done_event, line_event, status_event
 from chef.publishers import get_publisher
-from chef.types import BakeState, Mode, SnapshotKind
-from chef import store
-
-# ``chef.engine.pyinfra_runner`` is written by a sibling module and may not exist yet.
-# Import it if present; otherwise fall back to a placeholder that fails loudly *when
-# called* — this keeps ``import chef.worker.bake_job`` total, and tests monkeypatch the
-# module-level ``run_phase`` name regardless.
-try:
-    from chef.engine.pyinfra_runner import run_phase
-except ImportError:  # pragma: no cover - exercised only until the engine lands
-
-    def run_phase(target, recipe, phase, inputs, emit):  # type: ignore[misc]
-        raise RuntimeError(
-            "chef.engine.pyinfra_runner.run_phase is not available yet"
-        )
-
+from chef.types import BakeState, Mode, SnapshotKind, SnapshotRef
 
 Emit = Callable[[dict], None]
 
 
-# --- the shared pipeline -----------------------------------------------------
+# --- the shared, synchronous pipeline ----------------------------------------
 
 
-async def _run_pipeline(bake_id: str, emit: Emit) -> None:
+def run_pipeline(bake_id: str, emit: Emit) -> int:
     """Drive one bake from acquire → publish, emitting events and persisting state.
 
-    Terminal handling: success → ``done(0)``; any exception → a ``line`` + ``done(1)`` and
-    a ``failed`` record (swallowed, not re-raised — the run is *recorded*, not crashed);
-    ``CancelledError`` (arq abort) → ``aborted`` + release + re-raise. The builder is
-    always released best-effort.
+    Returns the exit code (0 success, 1 failure/abort). Runs entirely on the calling
+    thread — the caller MUST be a process main thread (pyinfra/gevent requirement).
+
+    Terminal handling: success → ``done(0)``; any exception → ``line`` + ``done(1)`` +
+    a ``failed`` record; ``KeyboardInterrupt``/``SystemExit`` (subprocess SIGTERM = abort)
+    → ``aborted``. The builder is always released best-effort.
     """
     settings = get_settings()
 
@@ -79,8 +67,6 @@ async def _run_pipeline(bake_id: str, emit: Emit) -> None:
         emit(status_event(state.value, phase))
 
     def _phase_emit(phase: str) -> Emit:
-        """Wrap ``emit`` so ``step`` events during ``phase`` are mirrored into the store."""
-
         def _emit(event: dict) -> None:
             emit(event)
             if event.get("type") == "step":
@@ -100,43 +86,33 @@ async def _run_pipeline(bake_id: str, emit: Emit) -> None:
         # --- acquire ---------------------------------------------------------
         _set(BakeState.acquiring)
         title = f"{recipe.manifest.name}-{version}"
-        target = await asyncio.to_thread(
-            builder.acquire, recipe.manifest.base_image, recipe.manifest.size, title=title
-        )
+        target = builder.acquire(recipe.manifest.base_image, recipe.manifest.size, title=title)
         store.set_bake(bake_id, vm_ref=target.vm_ref)
 
         # --- build -----------------------------------------------------------
         _set(BakeState.building, phase="build")
-        await asyncio.to_thread(
-            run_phase, target, recipe, "build", inputs, _phase_emit("build")
-        )
+        run_phase(target, recipe, "build", inputs, _phase_emit("build"))
 
         # --- verify (fail-loud gate before any snapshot) ---------------------
         if recipe.has_phase("verify"):
             _set(BakeState.verifying, phase="verify")
-            await asyncio.to_thread(
-                run_phase, target, recipe, "verify", inputs, _phase_emit("verify")
-            )
+            run_phase(target, recipe, "verify", inputs, _phase_emit("verify"))
 
         # --- snapshot (cold before warm, decision #7) ------------------------
         _set(BakeState.snapshotting)
-        snapshots: dict[SnapshotKind, object] = {}
+        snapshots: dict[SnapshotKind, SnapshotRef] = {}
         for kind in Mode(bake.mode).kinds():
             if kind is SnapshotKind.cold:
-                await asyncio.to_thread(builder.stop, target)
-                snapshots[kind] = await asyncio.to_thread(
-                    builder.snapshot, target, SnapshotKind.cold,
-                    title=f"{recipe.manifest.name}-{version}-cold",
+                builder.stop(target)
+                snapshots[kind] = builder.snapshot(
+                    target, SnapshotKind.cold, title=f"{title}-cold"
                 )
             elif kind is SnapshotKind.warm:
-                await asyncio.to_thread(builder.start, target)
+                builder.start(target)
                 if recipe.has_phase("warm_arm"):
-                    await asyncio.to_thread(
-                        run_phase, target, recipe, "warm_arm", inputs, _phase_emit("warm_arm")
-                    )
-                snapshots[kind] = await asyncio.to_thread(
-                    builder.snapshot, target, SnapshotKind.warm,
-                    title=f"{recipe.manifest.name}-{version}-warm",
+                    run_phase(target, recipe, "warm_arm", inputs, _phase_emit("warm_arm"))
+                snapshots[kind] = builder.snapshot(
+                    target, SnapshotKind.warm, title=f"{title}-warm"
                 )
 
         # --- publish ---------------------------------------------------------
@@ -144,9 +120,8 @@ async def _run_pipeline(bake_id: str, emit: Emit) -> None:
         for kind, snap in snapshots.items():
             for pub_cfg in recipe.manifest.publish:
                 publisher = get_publisher(pub_cfg["type"])
-                loc = await asyncio.to_thread(
-                    publisher.publish, snap,
-                    recipe=recipe.manifest.name, version=version, config=pub_cfg,
+                loc = publisher.publish(
+                    snap, recipe=recipe.manifest.name, version=version, config=pub_cfg
                 )
                 emit(line_event(f"published {kind.value} → {loc.uri}"))
                 store.create_image(
@@ -169,30 +144,32 @@ async def _run_pipeline(bake_id: str, emit: Emit) -> None:
                 )
 
         # --- done ------------------------------------------------------------
-        await _release(builder, target)
+        _release(builder, target)
         target = None
         store.set_bake(bake_id, status=BakeState.succeeded.value, exit_code=0)
         emit(done_event(0, BakeState.succeeded.value))
+        return 0
 
-    except asyncio.CancelledError:
+    except (KeyboardInterrupt, SystemExit):
         store.set_bake(bake_id, status=BakeState.aborted.value, exit_code=1)
         emit(line_event("bake aborted"))
         emit(done_event(1, BakeState.aborted.value))
-        await _release(builder, target)
-        raise
+        _release(builder, target)
+        return 1
     except Exception as exc:  # noqa: BLE001 - record the failure, don't crash the worker
         emit(line_event(str(exc)))
         store.set_bake(bake_id, status=BakeState.failed.value, exit_code=1, error=str(exc))
         emit(done_event(1, BakeState.failed.value))
-        await _release(builder, target)
+        _release(builder, target)
+        return 1
 
 
-async def _release(builder, target) -> None:
+def _release(builder, target) -> None:
     """Best-effort teardown; a release failure must never mask the bake's own outcome."""
     if target is None:
         return
     try:
-        await asyncio.to_thread(builder.release, target)
+        builder.release(target)
     except Exception:  # noqa: BLE001
         pass
 
@@ -200,10 +177,9 @@ async def _release(builder, target) -> None:
 # --- redis-backed emit -------------------------------------------------------
 
 
-def _redis_emit(bake_id: str, redis_url: str, ttl_seconds: int) -> Emit:
-    """An ``emit`` that ``XADD``s each event (as JSON under a ``data`` field) onto the
-    per-bake Redis Stream and refreshes its TTL. Uses a synchronous client so it is safe
-    to call from the worker threads that run the sync builder/publisher/run_phase code."""
+def redis_emit(bake_id: str, redis_url: str, ttl_seconds: int) -> Emit:
+    """An ``emit`` that ``XADD``s each event (JSON under a ``data`` field) onto the per-bake
+    Redis Stream and refreshes its TTL. Synchronous client — safe on a pipeline main thread."""
     client = redis.Redis.from_url(redis_url)
     key = f"chef:bake:{bake_id}:log"
 
@@ -218,19 +194,31 @@ def _redis_emit(bake_id: str, redis_url: str, ttl_seconds: int) -> Emit:
 # --- entry points ------------------------------------------------------------
 
 
-async def bake(ctx: dict, bake_id: str) -> None:
-    """arq task: run the pipeline, streaming events onto the bake's Redis Stream."""
-    settings = get_settings()
-    emit = _redis_emit(bake_id, settings.redis_url, settings.log_stream_ttl_seconds)
-    await _run_pipeline(bake_id, emit)
+async def bake(ctx: dict, bake_id: str) -> int:
+    """arq task: run the pipeline in an isolated subprocess so pyinfra owns a main thread.
+
+    The subprocess streams events straight to Redis; abort (``Job.abort`` →
+    ``CancelledError``) terminates it (SIGTERM → the subprocess records ``aborted``)."""
+    proc = await asyncio.create_subprocess_exec(
+        sys.executable, "-m", "chef.worker.entry", bake_id
+    )
+    try:
+        return await proc.wait()
+    except asyncio.CancelledError:
+        proc.terminate()
+        try:
+            await asyncio.wait_for(proc.wait(), timeout=30)
+        except asyncio.TimeoutError:
+            proc.kill()
+        raise
 
 
 def run_bake_inline(bake_id: str) -> list[dict]:
-    """Run the same pipeline synchronously with an in-memory sink; return the events.
+    """Run the pipeline synchronously with an in-memory sink; return the events.
 
-    Used by the CLI (``chef bake --inline``) and tests — no arq, no Redis. The bake record
-    must already exist in the store."""
+    Used by the CLI (``chef bake``) and tests — no arq, no Redis. Runs on the caller's
+    main thread. The bake record must already exist in the store."""
     store.init_db()
     events: list[dict] = []
-    asyncio.run(_run_pipeline(bake_id, events.append))
+    run_pipeline(bake_id, events.append)
     return events
