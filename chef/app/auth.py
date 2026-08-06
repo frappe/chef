@@ -41,6 +41,10 @@ def is_public_path(path: str) -> bool:
     """True for paths served without authentication (see :data:`PUBLIC_PATHS`)."""
     if path in PUBLIC_PATHS:
         return True
+    # The bake log stream is consumed by the browser's EventSource, which cannot send an
+    # Authorization header — so `/bakes/{id}/logs` is reachable without the bearer token.
+    if path.startswith("/bakes/") and path.endswith("/logs"):
+        return True
     # Swagger UI / ReDoc assets live under these prefixes.
     return path.startswith(("/docs", "/redoc"))
 
