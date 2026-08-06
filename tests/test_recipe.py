@@ -80,3 +80,20 @@ def test_nginx_validate_inputs_rejects_bad_value():
     # Unknown key: schema is closed (additionalProperties=False).
     with pytest.raises(RecipeError):
         recipe.validate_inputs({"nope": "x"})
+
+
+def test_webapp_composes_hello_and_nginx():
+    recipe = load_recipe(RECIPES_DIR, "webapp")
+    m = recipe.manifest
+
+    assert m.compose == ["hello", "nginx"]
+    assert recipe.lineage == ["hello", "nginx", "webapp"]
+    # base_image + size are inherited (max of hello 1/512/10 and nginx 1/1024/10).
+    assert m.base_image == "ubuntu-24.04"
+    assert (m.size.vcpus, m.size.memory_megabytes, m.size.disk_gigabytes) == (1, 1024, 10)
+    # nginx's input flows through; publish is webapp's own.
+    assert "worker_processes" in recipe.input_schema()["properties"]
+    assert m.publish == [{"type": "local"}]
+    # build runs hello then nginx; verify is nginx's (hello has none).
+    assert [n for n, _ in recipe.phase_chain("build")] == ["hello", "nginx"]
+    assert [n for n, _ in recipe.phase_chain("verify")] == ["nginx"]

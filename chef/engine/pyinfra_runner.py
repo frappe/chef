@@ -60,9 +60,12 @@ def run_phase(
     No-ops (returns immediately) when the recipe leaves the phase empty. Raises
     :class:`RunPhaseError` on the first failed operation.
     """
-    phase_callable = recipe.load_phase(phase)
-    if phase_callable is None:
+    # A composed recipe contributes several phase callables — each base's own @deploy in
+    # stack order, then the recipe's own last. A plain recipe yields a chain of one.
+    chain = recipe.phase_chain(phase)
+    if not chain:
         return
+    composed = len(chain) > 1
 
     inventory = _build_inventory(target, inputs)
     state = State(inventory, Config(), check_for_changes=False)
@@ -80,8 +83,18 @@ def run_phase(
         connect_all(state)
         host = _only_host(state)
 
-        # Enqueue the whole phase; each queued op lands in state.get_op_order().
-        add_deploy(state, phase_callable)
+        # Enqueue every callable in the chain; each queued op lands in state.get_op_order().
+        # Remember which recipe introduced each op (by first appearance, so it holds however
+        # pyinfra orders them) to label its steps in a composed bake.
+        op_source: dict[str, str] = {}
+        seen: set[str] = set()
+        for source_name, phase_callable in chain:
+            add_deploy(state, phase_callable)
+            for op_hash in state.get_op_order():
+                if op_hash not in seen:
+                    seen.add(op_hash)
+                    op_source[op_hash] = source_name
+
         op_order = state.get_op_order()
         total = len(op_order)
 
@@ -90,7 +103,8 @@ def run_phase(
             for index, op_hash in enumerate(op_order, start=1):
                 with ctx_host.use(host):
                     succeeded = run_host_op(state, host, op_hash)
-                _emit_op(state, host, op_hash, index, total, succeeded, emit)
+                label = op_source.get(op_hash) if composed else None
+                _emit_op(state, host, op_hash, index, total, succeeded, emit, label)
     finally:
         pyinfra_logger.removeHandler(handler)
         pyinfra_logger.setLevel(previous_level)
@@ -104,9 +118,16 @@ def _emit_op(
     total: int,
     succeeded: bool,
     emit: Callable[[dict], None],
+    source: str | None = None,
 ) -> None:
-    """Turn one executed op into a ``step`` event + its output ``line`` events; raise on failure."""
+    """Turn one executed op into a ``step`` event + its output ``line`` events; raise on failure.
+
+    ``source`` (set only for a composed recipe) prefixes the step name with the recipe the
+    op came from, e.g. ``nginx › install nginx`` — so a composed bake's log stays legible.
+    """
     name = ", ".join(sorted(state.get_op_meta(op_hash).names)) or f"operation {index}"
+    if source:
+        name = f"{source} › {name}"
 
     # A skipped op (e.g. filtered off this host) never completes — treat as a no-op.
     op_data = state.ops[host].get(op_hash)

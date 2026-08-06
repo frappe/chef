@@ -1,0 +1,36 @@
+name        = "erpnext"
+version     = "0.1.0"
+description = "A Pilot golden with ERPNext (and optionally HRMS) installed onto its Frappe site."
+compose     = ["pilot"]                 # inherit the whole Pilot golden, then add apps on top
+tags        = ["frappe", "erpnext"]
+
+[phases]
+build  = "recipe:build"                 # runs AFTER pilot's build (bench + site already exist)
+verify = "recipe:verify"                # runs AFTER pilot's verify
+
+[size]
+# Inherited from pilot as a floor (max); ERPNext + HRMS asset builds want more boot-fat.
+vcpus = 2
+memory_megabytes = 4096
+disk_gigabytes = 30
+build_memory_megabytes = 8192
+
+# site_name, admin_password, admin_domain and frappe_branch are INHERITED from pilot's
+# inputs (union) — this recipe's build reads the same host.data. It adds two of its own:
+
+[inputs.erpnext_branch]
+type = "string"
+default = "version-15"
+description = "ERPNext app branch to get-app."
+
+[inputs.install_hrms]
+type = "string"
+default = "true"
+description = "Also install HRMS onto the site ('true'/'false')."
+
+[[publish]]
+type = "atlas-base-image"
+name = "erpnext-chef"
+
+[[publish]]
+type = "local"

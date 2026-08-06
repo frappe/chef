@@ -66,17 +66,51 @@
         </div>
       </div>
 
+      <!-- Composed from -->
+      <section v-if="recipe.compose?.length" class="mt-5">
+        <h3 class="mb-2 text-sm font-medium text-ink-gray-7">Composed from</h3>
+        <div class="flex flex-wrap items-center gap-1.5">
+          <template v-for="(dep, i) in recipe.lineage" :key="dep">
+            <span v-if="i > 0" class="text-ink-gray-4">→</span>
+            <RouterLink
+              v-if="dep !== recipe.name"
+              :to="{ name: 'RecipeDetail', params: { name: dep } }"
+              class="rounded-md border border-outline-gray-2 bg-surface-gray-1 px-2.5 py-1 text-xs text-ink-blue-600 hover:bg-surface-gray-2"
+            >
+              {{ dep }}
+            </RouterLink>
+            <span
+              v-else
+              class="rounded-md border border-outline-gray-3 bg-surface-selected px-2.5 py-1 text-xs font-medium text-ink-gray-9"
+            >
+              {{ dep }}
+            </span>
+          </template>
+        </div>
+        <p class="mt-1.5 text-xs text-ink-gray-5">
+          Base recipes stacked in order — each recipe's steps run left to right, then this
+          recipe's own.
+        </p>
+      </section>
+
       <!-- Phases -->
       <section class="mt-5">
         <h3 class="mb-2 text-sm font-medium text-ink-gray-7">Phases</h3>
-        <div class="flex flex-wrap gap-2">
-          <span
-            v-for="(entry, phase) in recipe.phases"
+        <div class="flex flex-col gap-1.5">
+          <div
+            v-for="(sources, phase) in recipe.phase_sources"
             :key="phase"
-            class="rounded-md border border-outline-gray-2 bg-surface-gray-1 px-2.5 py-1 text-xs text-ink-gray-7"
+            class="flex flex-wrap items-center gap-1.5 text-xs"
           >
-            {{ phase }}
-          </span>
+            <span
+              class="rounded-md border border-outline-gray-2 bg-surface-gray-1 px-2.5 py-1 font-medium text-ink-gray-8"
+            >
+              {{ phase }}
+            </span>
+            <span v-if="sources.length > 1 || sources[0] !== recipe.name" class="text-ink-gray-5">
+              {{ sources.join(' → ') }}
+            </span>
+          </div>
           <span v-if="!phaseCount" class="text-xs text-ink-gray-5">No phases declared.</span>
         </div>
       </section>
@@ -156,7 +190,7 @@ const facts = computed(() => {
   ]
 })
 
-const phaseCount = computed(() => Object.keys(recipe.value?.phases || {}).length)
+const phaseCount = computed(() => Object.keys(recipe.value?.phase_sources || {}).length)
 
 const sourceFiles = computed(() =>
   Object.entries(recipe.value?.source || {}).map(([fileName, content]) => ({

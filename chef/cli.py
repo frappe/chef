@@ -142,18 +142,35 @@ def bake(
 
 
 @app.command()
-def new(name: str = typer.Argument(..., help="New recipe name.")) -> None:
-    """Scaffold a new recipe directory from the template."""
-    from chef.engine.recipe import recipe_template
+def new(
+    name: str = typer.Argument(..., help="New recipe name."),
+    compose: Optional[str] = typer.Option(
+        None,
+        "--compose",
+        help="Comma-separated base recipes to stack, e.g. 'pilot,mail'. Scaffolds a "
+        "single-file composed recipe (no recipe.py) that appends the bases in order.",
+    ),
+) -> None:
+    """Scaffold a new recipe directory from the template.
+
+    Plain: a ``recipe.toml`` + ``recipe.py`` skeleton. With ``--compose pilot,mail``: just a
+    ``recipe.toml`` that stacks those recipes — the trivial "combine two recipes into a 3rd."
+    """
+    from chef.engine.recipe import composed_recipe_template, recipe_template
 
     dest = get_settings().recipes_dir / name
     if dest.exists():
         typer.secho(f"{dest} already exists", fg="red", err=True)
         raise typer.Exit(1)
+
+    bases = [b.strip() for b in compose.split(",") if b.strip()] if compose else []
+    files = composed_recipe_template(name, bases) if bases else recipe_template()
+
     dest.mkdir(parents=True)
-    for filename, content in recipe_template().items():
+    for filename, content in files.items():
         (dest / filename).write_text(content)
-    typer.secho(f"created recipe {name} at {dest}", fg="green")
+    label = f"composed recipe {name} ({' + '.join(bases)})" if bases else f"recipe {name}"
+    typer.secho(f"created {label} at {dest}", fg="green")
 
 
 @app.command(name="install-service")
