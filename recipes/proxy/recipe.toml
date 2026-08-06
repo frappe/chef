@@ -1,9 +1,9 @@
 name        = "proxy"
 version     = "1.0.0"
-description = "Atlas reverse-proxy image — upload the committed proxy/ tree and run its build.sh verbatim (shim)."
+description = "Atlas reverse-proxy image — native pyinfra build of the nginx + OpenResty Lua stack (no build.sh)."
 base_image  = "ubuntu-24.04"
 modes       = ["cold"]
-tags        = ["proxy", "atlas", "shim"]
+tags        = ["proxy", "atlas", "native"]
 
 [phases]
 build  = "recipe:build"
