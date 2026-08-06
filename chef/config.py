@@ -51,6 +51,7 @@ class Settings(BaseSettings):
     atlas_api_key: str | None = None
     atlas_api_secret: str | None = None
     atlas_ssh_key_file: str | None = None  # chef's private key; its pubkey is in service_public_keys
+    atlas_server: str | None = None        # pin bakes to a specific Atlas Server (else placement picks)
 
     @property
     def s3_configured(self) -> bool:

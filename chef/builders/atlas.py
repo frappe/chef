@@ -45,6 +45,7 @@ class AtlasBuilder(Builder):
         client: AtlasClient | None = None,
         ssh_key_file: str | None = None,
         *,
+        server: str | None = None,
         ready_timeout: float = 600,
         poll_interval: float = 5,
     ):
@@ -52,6 +53,8 @@ class AtlasBuilder(Builder):
         self.client = client or AtlasClient.from_settings(settings)
         # chef's private key; its public half lives in Atlas's service_public_keys.
         self.ssh_key_file = ssh_key_file if ssh_key_file is not None else settings.atlas_ssh_key_file
+        # optional: pin bakes to one Server (else Atlas placement picks one holding the image).
+        self.server = server if server is not None else settings.atlas_server
         self.ready_timeout = ready_timeout
         self.poll_interval = poll_interval
 
@@ -66,24 +69,35 @@ class AtlasBuilder(Builder):
             memory_megabytes=size.memory_megabytes,
             disk_gigabytes=size.disk_gigabytes,
             ssh_public_key=public_key,
+            server=self.server,
         )
         name = created.get("name")
         if not name:
             raise BuilderError(f"atlas create_bare_vm returned no VM name: {created!r}")
 
         vm = self._poll_vm_running(name)
-        server_ipv4 = vm.get("server_ipv4")
-        server = vm.get("server")
-        guest_ipv6 = vm.get("ipv6_address")
-        if not (server_ipv4 and guest_ipv6):
-            raise BuilderError(
-                f"atlas VM {name} is Running but missing routing info "
-                f"(server_ipv4={server_ipv4!r}, ipv6_address={guest_ipv6!r})"
-            )
+        try:
+            server_ipv4 = vm.get("server_ipv4")
+            server = vm.get("server")
+            # Atlas's get_virtual_machine reports the guest address as `guest_ipv6`;
+            # create_bare_vm returns it as `ipv6_address` — accept either.
+            guest_ipv6 = vm.get("guest_ipv6") or vm.get("ipv6_address")
+            if not (server_ipv4 and guest_ipv6):
+                raise BuilderError(
+                    f"atlas VM {name} is Running but missing routing info "
+                    f"(server_ipv4={server_ipv4!r}, guest_ipv6={guest_ipv6!r})"
+                )
 
-        config_dir = Path(tempfile.mkdtemp(prefix="chef-atlas-"))
-        config_path = self._write_ssh_config(config_dir, guest_ipv6, server_ipv4)
-        self._wait_ssh_ready(config_path, name)
+            config_dir = Path(tempfile.mkdtemp(prefix="chef-atlas-"))
+            config_path = self._write_ssh_config(config_dir, guest_ipv6, server_ipv4)
+            self._wait_ssh_ready(config_path, name)
+        except BaseException:
+            # never leak a scratch VM if acquire fails after the VM was created
+            try:
+                self.client.terminate_vm(name)
+            except Exception:  # noqa: BLE001
+                pass
+            raise
 
         return SshTarget(
             connector="ssh",
