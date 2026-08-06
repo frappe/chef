@@ -19,6 +19,12 @@ class Publisher(ABC):
     #: the ``[[publish]] type = "…"`` value this publisher handles
     type: str = "base"
 
+    #: builder names whose snapshot representation this publisher can consume, or ``None``
+    #: for any. A recipe lists every destination it *wants*; the bake pipeline runs only
+    #: the publishers compatible with the active builder (e.g. LocalPublisher uploads a
+    #: local tar and can't consume an Atlas snapshot reference), skipping the rest.
+    builders: tuple[str, ...] | None = None
+
     @abstractmethod
     def publish(
         self,

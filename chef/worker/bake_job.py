@@ -120,6 +120,12 @@ def run_pipeline(bake_id: str, emit: Emit) -> int:
         for kind, snap in snapshots.items():
             for pub_cfg in recipe.manifest.publish:
                 publisher = get_publisher(pub_cfg["type"])
+                if publisher.builders and builder.name not in publisher.builders:
+                    emit(line_event(
+                        f"skip publish '{pub_cfg['type']}' — needs builder "
+                        f"{'/'.join(publisher.builders)}, active is '{builder.name}'"
+                    ))
+                    continue
                 loc = publisher.publish(
                     snap, recipe=recipe.manifest.name, version=version, config=pub_cfg
                 )

@@ -18,6 +18,7 @@ from chef.types import ImageLocation, SnapshotRef
 
 class S3Publisher(Publisher):
     type = "s3"
+    builders = ("docker", "local")  # uploads a local snapshot tar
 
     def __init__(self, settings: Settings | None = None):
         self.settings = settings or get_settings()

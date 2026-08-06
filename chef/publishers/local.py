@@ -20,6 +20,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 
 class LocalPublisher(Publisher):
     type = "local"
+    builders = ("docker", "local")  # consumes a local snapshot tar
 
     def __init__(self, base_dir: Path | None = None):
         self.base_dir = Path(base_dir) if base_dir else _REPO_ROOT / "data" / "images"

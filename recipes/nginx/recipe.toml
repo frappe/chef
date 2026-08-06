@@ -24,3 +24,7 @@ type = "local"
 
 [[publish]]
 type = "s3"
+
+[[publish]]
+type = "atlas-base-image"
+name = "nginx-chef"

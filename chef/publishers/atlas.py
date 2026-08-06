@@ -26,6 +26,7 @@ _POLL_INTERVAL = 5
 
 class AtlasPublisher(Publisher):
     type = "atlas-base-image"
+    builders = ("atlas",)  # promotes an Atlas-side snapshot reference
 
     def __init__(
         self,

@@ -43,7 +43,7 @@ def test_nginx_manifest_and_phases():
     assert m.name == "nginx"
     assert m.base_image == "ubuntu-24.04"
     assert m.modes == ["cold"]
-    assert [p["type"] for p in m.publish] == ["local", "s3"]
+    assert [p["type"] for p in m.publish] == ["local", "s3", "atlas-base-image"]
 
     assert recipe.has_phase("verify") is True
     assert callable(recipe.load_phase("build"))
