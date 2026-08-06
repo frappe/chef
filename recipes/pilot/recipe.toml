@@ -1,0 +1,43 @@
+name        = "pilot"
+version     = "0.1.0"
+description = "A Frappe/Pilot golden: a working Pilot admin console + a Frappe site."
+base_image  = "ubuntu-24.04"
+modes       = ["cold"]
+tags        = ["frappe", "pilot"]
+
+[phases]
+build  = "recipe:build"
+verify = "recipe:verify"
+
+[size]
+vcpus = 2
+memory_megabytes = 4096                 # what a clone serves at
+disk_gigabytes = 25
+build_memory_megabytes = 6144           # boot fat: `pilot init` builds frappe assets (yarn)
+
+[inputs.admin_password]
+type = "string"
+default = "admin123"
+description = "Password for the Pilot admin console (bench.toml [admin].password)."
+
+[inputs.site_name]
+type = "string"
+default = "site.local"
+description = "The Frappe site to create and serve."
+
+[inputs.admin_domain]
+type = "string"
+default = "admin.local"
+description = "Host the admin console is reached at (nginx server_name)."
+
+[inputs.frappe_branch]
+type = "string"
+default = "version-16"
+description = "Frappe app branch (bench.toml frappe [[apps]].branch)."
+
+[[publish]]
+type = "atlas-base-image"
+name = "pilot-chef"
+
+[[publish]]
+type = "local"
