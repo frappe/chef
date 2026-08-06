@@ -76,6 +76,26 @@ def test_unknown_recipe_404(client):
     assert r.json()["error"] == "not_found"
 
 
+def test_list_exposes_compose(client):
+    r = client.get("/recipes/", headers=AUTH)
+    by_name = {item["name"]: item for item in r.json()}
+    assert by_name["webapp"]["compose"] == ["hello", "nginx"]
+    assert by_name["hello"]["compose"] == []  # a plain recipe composes nothing
+
+
+def test_detail_exposes_lineage_and_phase_sources(client):
+    r = client.get("/recipes/webapp", headers=AUTH)
+    assert r.status_code == 200
+    body = r.json()
+    assert body["compose"] == ["hello", "nginx"]
+    assert body["lineage"] == ["hello", "nginx", "webapp"]
+    assert body["phase_sources"]["build"] == ["hello", "nginx"]
+    assert body["phase_sources"]["verify"] == ["nginx"]
+    # the composed source view carries every stacked recipe's files, keyed by recipe.
+    assert "hello/recipe.py" in body["source"]
+    assert "nginx/recipe.toml" in body["source"]
+
+
 def test_validate_ok_for_good_inputs(client):
     r = client.post(
         "/recipes/validate",
