@@ -1,0 +1,49 @@
+[project]
+name = "chef"
+version = "0.1.0"
+description = "A generic declarative image-baking platform"
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "sse-starlette>=2.1",
+    "pydantic>=2.7",
+    "pydantic-settings>=2.3",
+    "sqlmodel>=0.0.22",
+    "arq>=0.26",
+    "redis>=5.0",
+    "pyinfra>=3.2",
+    "jsonschema>=4.22",
+    "boto3>=1.34",
+    "typer>=0.12",
+    "httpx>=0.27",
+    "python-multipart>=0.0.9",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "pytest-asyncio>=0.23",
+    "anyio>=4",
+    "ruff>=0.6",
+]
+
+[project.scripts]
+chef = "chef.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["chef"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
