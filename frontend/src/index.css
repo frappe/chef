@@ -1,0 +1,63 @@
+:root {
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+body {
+  @apply bg-surface-base text-ink-gray-9 text-base;
+}
+
+/* Subtle entrance for routed pages. */
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.fade-in {
+  animation: fade-in 0.3s var(--ease-out);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  ::before,
+  ::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+}
+
+/* Keep the frappe-ui dialog overlay above the sticky header. */
+.dialog-overlay {
+  z-index: 50;
+}
+.menu-content {
+  z-index: 51;
+}
+
+/* Thin, hover-revealed scrollbars — the macOS overlay feel everywhere. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+*:hover {
+  scrollbar-color: var(--outline-gray-3) transparent;
+}
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background-color: transparent;
+  border-radius: 9999px;
+}
+:hover::-webkit-scrollbar-thumb {
+  background-color: var(--outline-gray-3);
+}
