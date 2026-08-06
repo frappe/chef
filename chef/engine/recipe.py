@@ -381,6 +381,7 @@ description = "What this image is"
 base_image  = "ubuntu-24.04"           # a name the chosen Builder understands
 modes       = ["cold"]                  # or ["cold", "warm"]
 tags        = []
+# compose   = ["pilot", "mail"]         # stack other recipes; see `chef new <name> --compose`
 
 [phases]
 build     = "recipe:build"              # required — module:callable pyinfra @deploy
@@ -428,3 +429,34 @@ def verify():
 def recipe_template() -> dict[str, str]:
     """The skeleton emitted by ``GET /recipes/template``."""
     return {"recipe.toml": RECIPE_TOML_TEMPLATE, "recipe.py": RECIPE_PY_TEMPLATE}
+
+
+def composed_recipe_template(name: str, bases: list[str]) -> dict[str, str]:
+    """A single-file skeleton for a recipe that only *stacks* others (no ``recipe.py``).
+
+    This is the trivial "combine A and B into a 3rd recipe" path — the whole recipe is a
+    ``recipe.toml`` naming its bases. Add your own trailing steps later by dropping in a
+    ``recipe.py`` and a ``[phases]`` block; override a base's input default (e.g. to fix a
+    port clash) with an ``[inputs.<name>]`` table here.
+    """
+    listed = ", ".join(f'"{b}"' for b in bases)
+    order = " then ".join(bases) if bases else "the base recipes"
+    toml = f'''\
+name        = "{name}"
+version     = "1.0.0"
+description = "Combine {order} into one image"
+compose     = [{listed}]          # base recipes, stacked in this order
+
+# base_image, size and modes are inherited from the stacked recipes. The merge algebra:
+#   size = per-field max   ·   modes = intersection   ·   inputs = union (later wins)
+#   phases = each base's, then your own   ·   publish = your own targets (below)
+
+# Optional overrides — uncomment as needed:
+# modes = ["cold"]                # narrow/widen what the combined image supports
+# [inputs.some_port]              # override a base's input default (e.g. resolve a clash)
+# default = "9001"
+
+[[publish]]                       # where the combined image goes
+type = "local"
+'''
+    return {"recipe.toml": toml}
