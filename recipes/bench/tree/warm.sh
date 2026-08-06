@@ -38,7 +38,7 @@ BENCH_HOME="/home/$BENCH_USER"
 # ~/pilot since the frappe/bench-cli → frappe/pilot rename; see build.sh's note.
 BENCH_CLI_DIR="$BENCH_HOME/pilot"
 BENCH_NAME="atlas"
-BENCH="$BENCH_CLI_DIR/bench"
+BENCH="$BENCH_CLI_DIR/pilot"
 
 # Run a bench-cli command as the bench user through a login shell — mirrors
 # build.sh's as_frappe (same PATH/XDG_RUNTIME_DIR need for `systemctl --user`).

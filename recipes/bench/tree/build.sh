@@ -257,7 +257,7 @@ echo "pilot version: ${INSTALLED_VERSION:-<git checkout>}"
 # image's config is ours, not bench-cli's template. Idempotent: skip `bench new`
 # if the bench dir already exists; the toml copy is an overwrite either way. ---
 if [ ! -f "$BENCH_DIR/bench.toml" ]; then
-	as_frappe "bench new '$BENCH_NAME'"
+	as_frappe "pilot new '$BENCH_NAME'"
 fi
 install -m 0644 -o "$BENCH_USER" -g "$BENCH_USER" "$SRC_DIR/bench.toml" "$BENCH_DIR/bench.toml"
 
@@ -297,7 +297,7 @@ fi
 # old `source .admin-venv/bin/activate` pymysql workaround is gone — current bench-cli
 # runs `bench init` inside its managed admin venv itself, so pymysql is found without
 # a manual activate. ---
-as_frappe "bench -b '$BENCH_NAME' init"
+as_frappe "pilot -b '$BENCH_NAME' init"
 
 # --- 5a. Install `tzdata` into the bench venv. bench.toml pins python = "3.14", so
 # `bench init` builds the venv on a uv-managed standalone CPython. Unlike a distro
@@ -318,7 +318,7 @@ if [ "$MODE" = "site" ]; then
 	# background jobs, so Redis must be up: `bench start` brings the production
 	# stack up (its systemd units), which we leave running for the rest of the bake.
 	if [ "$INCLUDE_ERPNEXT" = "1" ] && [ ! -d "$BENCH_DIR/apps/erpnext" ]; then
-		as_frappe "bench -b '$BENCH_NAME' get-app https://github.com/frappe/erpnext --branch '$ERPNEXT_BRANCH'"
+		as_frappe "pilot -b '$BENCH_NAME' get-app https://github.com/frappe/erpnext --branch '$ERPNEXT_BRANCH'"
 	fi
 
 	# Bring the production stack up. `install-app erpnext` below enqueues background
@@ -329,7 +329,7 @@ if [ "$MODE" = "site" ]; then
 	# we run `setup production` here (idempotent; ~17s on a re-run). Combined with the
 	# bench user's linger + XDG_RUNTIME_DIR (set above), this is what actually starts
 	# the `systemctl --user` redis units the rest of the bake depends on.
-	as_frappe "bench -b '$BENCH_NAME' setup production"
+	as_frappe "pilot -b '$BENCH_NAME' setup production"
 
 	# Block until redis_queue is actually accepting connections before install-app —
 	# `setup production` returns once the units are started, but the socket may lag a
@@ -347,18 +347,18 @@ if [ "$MODE" = "site" ]; then
 
 	if [ ! -d "$BENCH_DIR/sites/$BAKED_SITE" ]; then
 		if [ "$INCLUDE_ERPNEXT" = "1" ]; then
-			as_frappe "bench -b '$BENCH_NAME' new-site '$BAKED_SITE' --admin-password '$BAKED_ADMIN_PASSWORD' --apps erpnext"
-			as_frappe "bench -b '$BENCH_NAME' frappe --site '$BAKED_SITE' install-app erpnext"
+			as_frappe "pilot -b '$BENCH_NAME' new-site '$BAKED_SITE' --admin-password '$BAKED_ADMIN_PASSWORD' --apps erpnext"
+			as_frappe "pilot -b '$BENCH_NAME' frappe --site '$BAKED_SITE' install-app erpnext"
 		else
-			as_frappe "bench -b '$BENCH_NAME' new-site '$BAKED_SITE' --admin-password '$BAKED_ADMIN_PASSWORD'"
+			as_frappe "pilot -b '$BENCH_NAME' new-site '$BAKED_SITE' --admin-password '$BAKED_ADMIN_PASSWORD'"
 		fi
-		as_frappe "bench -b '$BENCH_NAME' frappe --site '$BAKED_SITE' migrate"
+		as_frappe "pilot -b '$BENCH_NAME' frappe --site '$BAKED_SITE' migrate"
 	fi
 
 	# Regenerate nginx now that the site exists (new-site already did, but a
 	# re-run / idempotent path makes this explicit) and assert the baked site
 	# answers locally before we let the VM be snapshotted.
-	as_frappe "bench -b '$BENCH_NAME' setup nginx"
+	as_frappe "pilot -b '$BENCH_NAME' setup nginx"
 
 	for _ in $(seq 1 60); do
 		curl -sf -o /dev/null -H "Host: $BAKED_SITE" http://127.0.0.1/api/method/ping && break
@@ -375,7 +375,7 @@ else
 	# [admin].domain + `bench setup nginx`), so there is nothing to assert here
 	# beyond the stack being up. As in site mode, `setup production` (not `start`)
 	# is what installs+enables the systemd --user units in current bench-cli.
-	as_frappe "bench -b '$BENCH_NAME' setup production"
+	as_frappe "pilot -b '$BENCH_NAME' setup production"
 fi
 
 # --- 6a. Enable nginx for boot. `bench setup production` START*s* nginx but never

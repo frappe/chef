@@ -72,7 +72,7 @@ BENCH_HOME = f"/home/{BENCH_USER}"
 BENCH_CLI_DIR = f"{BENCH_HOME}/pilot"
 BENCH_NAME = "atlas"
 BENCH_DIR = f"{BENCH_CLI_DIR}/benches/{BENCH_NAME}"
-BENCH = f"{BENCH_CLI_DIR}/bench"
+BENCH = f"{BENCH_CLI_DIR}/pilot"
 # The bench DB's UNIX socket — the readiness contract `_await_db_ready` probes, and
 # what the baked site_config.json's `db_socket` points at. pilot v0.0.9 runs MariaDB
 # as a user-owned `pilot-mariadb.service` with its datadir + socket under the pilot
