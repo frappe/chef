@@ -64,6 +64,14 @@
           <span class="truncate">{{ recipe.base_image }}</span>
         </div>
 
+        <div
+          v-if="recipe.compose?.length"
+          class="mt-1.5 flex items-center gap-1.5 text-xs text-ink-gray-5"
+        >
+          <span class="size-3.5 lucide-layers" />
+          <span class="truncate">composes {{ recipe.compose.join(', ') }}</span>
+        </div>
+
         <div class="mt-3 flex flex-wrap items-center gap-1.5">
           <Badge
             v-for="mode in recipe.modes"
