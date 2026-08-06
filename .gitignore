@@ -1,0 +1,40 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.eggs/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Chef local state
+*.db
+*.sqlite3
+chef.db
+data/
+.env
+.env.*
+!.env.example
+
+# uv
+.uv/
+
+# Node / frontend
+node_modules/
+frontend/dist/
+frontend/.vite/
+*.log
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Scratch
+/tmp/
+scratch/
