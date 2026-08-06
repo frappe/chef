@@ -1,0 +1,17 @@
+name        = "hello"
+version     = "1.0.0"
+description = "The smallest possible recipe: echo a line during build."
+base_image  = "ubuntu-24.04"
+modes       = ["cold"]
+tags        = ["example"]
+
+[phases]
+build = "recipe:build"
+
+[size]
+vcpus = 1
+memory_megabytes = 512
+disk_gigabytes = 10
+
+[[publish]]
+type = "local"

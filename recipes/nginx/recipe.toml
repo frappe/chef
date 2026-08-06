@@ -1,0 +1,26 @@
+name        = "nginx"
+version     = "1.0.0"
+description = "Install nginx, drop a templated nginx.conf, enable the service, verify it serves."
+base_image  = "ubuntu-24.04"
+modes       = ["cold"]
+tags        = ["web", "example"]
+
+[phases]
+build  = "recipe:build"
+verify = "recipe:verify"
+
+[size]
+vcpus = 1
+memory_megabytes = 1024
+disk_gigabytes = 10
+
+[inputs.worker_processes]
+type        = "string"
+default     = "auto"
+description = "nginx worker_processes directive ('auto' or a number-as-string)."
+
+[[publish]]
+type = "local"
+
+[[publish]]
+type = "s3"
