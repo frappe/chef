@@ -151,4 +151,23 @@ invokes the Typer app.
 ## Recipes (recipes/<name>/): recipe.py (pyinfra @deploy) + recipe.toml. See engine/recipe.py
 templates. `hello` = trivial; `nginx` = apt install + enable + a `verify` curl, one string
 input `worker_processes`.
+
+## Recipe composition (`compose` — engine/recipe.py, spine change)
+
+A recipe.toml may declare `compose = ["base_a", "base_b"]` (ordered) to **stack** other
+recipes. `load_recipe` resolves it: linearize the bases depth-first, de-dup by name (first
+wins, so diamonds collapse), append the recipe itself → an ordered **stack** ending in self;
+cycles and missing bases raise `RecipeError`. When `compose` is set, `base_image` and
+`[phases].build` are optional (inherited). The **merge algebra** (`_merge`): `base_image` =
+own-explicit-or-bases-agree; `size` = per-field max (an undeclared derived size doesn't
+count); `modes` = own-declared-or-intersection-of-bases; `tags` = union +`composed`; `inputs`
+= union, later-in-stack wins (override a default / share an input); `publish` = own only.
+Each phase runs **every stack member's own `@deploy` in order** — `Recipe.phase_chain(phase)`
+returns `[(name, callable)]`; `run_phase` `add_deploy`s each; `has_phase` is stack-aware.
+Because pyinfra ops resolve assets relative to each `recipe.py`'s `__file__`, a base's
+templates/files keep working un-copied. New `Manifest` fields: `compose`, `modes_declared`,
+`size_declared`. API: `RecipeSummary.compose`, `RecipeDetail.{lineage, phase_sources}`.
+`bake_job.py` is unchanged — resolution lives entirely in `load_recipe`/`Recipe`. Shipped
+examples: `webapp` (compose hello+nginx) and `erpnext` (compose pilot). Scaffold a composed
+recipe with `chef new <name> --compose a,b`.
 ```

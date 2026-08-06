@@ -14,6 +14,8 @@ one-command install).
   operations) + a `recipe.toml` manifest (base image, VM size, supported `modes`, typed
   `inputs`, `build`/`verify`/`warm_arm` phases, `[[publish]]` targets). The extension
   point; everything domain-specific is a recipe. Loaded by `chef/engine/recipe.py`.
+  Recipes are **algebraic**: a manifest may `compose = ["a", "b"]` to stack other recipes in
+  a definite order and add its own steps/overrides — see decision #12.
 - **Bake** — one run: a durable arq job (`chef/worker/bake_job.py`) that drives a recipe
   through the pipeline and emits streamed, per-step results. `bake_id` = uuid4.
 - **Image** — a produced artifact: cold or warm, with provenance
@@ -52,6 +54,13 @@ Atlas/boat are simply the default Builder + Publisher — never baked into chef'
 11. **Standalone FastAPI** (not a Frappe app); **arq + Redis** jobs; **Redis Streams** log
     bus; **SSE** streaming; **SQLite** index; **static bearer token** auth (v1); **uv**
     packaging (Python 3.12).
+12. **Composable recipes.** A recipe.toml may `compose = [...]` to stack other recipes,
+    resolved at load time into a deterministic linearization (bases depth-first, de-duplicated
+    first-wins, self last). Manifests merge by a fixed algebra — base_image agree-or-explicit,
+    size per-field max, modes intersection (or explicit), inputs union (later wins), publish
+    own-only — and each phase runs every stacked recipe's `@deploy` in order. A pure
+    composition needs no `recipe.py`. Composition is filesystem + engine only; the bake
+    pipeline is unchanged. See `CONTRACT.md`.
 
 ## Architecture
 
