@@ -25,10 +25,13 @@ def test_get_publisher_unknown_raises():
         get_publisher("nope")
 
 
-def test_get_publisher_atlas_lazy_error():
-    with pytest.raises(PublisherError) as exc:
+def test_get_publisher_atlas_needs_config():
+    # atlas-base-image now resolves (M2 landed), but constructing it unconfigured fails clearly.
+    from chef.atlas_client import AtlasError
+
+    with pytest.raises(AtlasError) as exc:
         get_publisher("atlas-base-image")
-    assert "atlas-base-image" in str(exc.value)
+    assert "not configured" in str(exc.value).lower()
 
 
 def test_local_publisher_is_a_publisher():

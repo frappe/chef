@@ -24,11 +24,13 @@ def test_get_builder_unknown_raises():
         get_builder("nope")
 
 
-def test_get_builder_atlas_lazy_error():
-    # atlas is M2 and not written yet — a clear error, not an ImportError leak.
-    with pytest.raises(BuilderError) as exc:
+def test_get_builder_atlas_needs_config():
+    # atlas now resolves (M2 landed), but constructing it unconfigured fails clearly.
+    from chef.atlas_client import AtlasError
+
+    with pytest.raises(AtlasError) as exc:
         get_builder("atlas")
-    assert "atlas" in str(exc.value)
+    assert "not configured" in str(exc.value).lower()
 
 
 def test_local_builder_is_a_builder():
