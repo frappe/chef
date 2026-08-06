@@ -1,0 +1,30 @@
+name        = "chef"
+version     = "0.1.0"                    # tracks chef.__version__
+description = "Install chef itself: uv + redis + the chef-api & chef-worker systemd units."
+base_image  = "ubuntu-24.04"
+modes       = ["cold"]
+tags        = ["chef", "self"]
+
+[phases]
+build  = "recipe:build"
+verify = "recipe:verify"
+
+# Only consulted when a Builder bakes a chef *image*. `chef install-service` runs this
+# recipe against pyinfra's @local connector, where base_image/size are ignored.
+[size]
+vcpus = 2
+memory_megabytes = 2048
+disk_gigabytes = 20
+
+[inputs.chef_source]
+type        = "string"
+default     = "git+https://github.com/frappe/chef"
+description = "Where to install chef from — any uv/pip source: a git+URL, a PyPI spec, or a local path."
+
+[inputs.redis_url]
+type        = "string"
+default     = "redis://localhost:6379"
+description = "Redis URL written to CHEF_REDIS_URL in /etc/chef/chef.env (the api ↔ worker log bus + job queue)."
+
+[[publish]]
+type = "local"

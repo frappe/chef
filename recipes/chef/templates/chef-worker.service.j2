@@ -1,0 +1,15 @@
+[Unit]
+Description=Chef bake worker (arq)
+After=network-online.target redis-server.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+EnvironmentFile=/etc/chef/chef.env
+ExecStart={{ chef_bin }} worker
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

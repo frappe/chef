@@ -5,7 +5,7 @@ Commands:
   * ``worker``          run the arq bake worker.
   * ``bake``            run a recipe inline (no redis) and print streamed events.
   * ``new``             scaffold a recipe directory from the template.
-  * ``install-service`` (M5) install a systemd unit — stub for now.
+  * ``install-service`` run the ``chef`` recipe against ``@local`` to install chef here.
 
 Heavy / optional modules (uvicorn, arq, the worker package) are imported lazily inside
 each command so ``import chef.cli`` always succeeds even before the worker lands.
@@ -157,9 +157,48 @@ def new(name: str = typer.Argument(..., help="New recipe name.")) -> None:
 
 
 @app.command(name="install-service")
-def install_service() -> None:
-    """Install Chef as a systemd service (M5)."""
-    typer.echo("not yet — systemd install lands in M5")
+def install_service(
+    redis_url: str = typer.Option(
+        "redis://localhost:6379", "--redis-url", help="Redis URL for the api + worker (CHEF_REDIS_URL)."
+    ),
+    chef_source: str = typer.Option(
+        "git+https://github.com/frappe/chef",
+        "--chef-source",
+        help="Where to install chef from (git+URL, PyPI spec, or a local path).",
+    ),
+) -> None:
+    """Install chef on THIS machine.
+
+    chef is itself a recipe (decision #9): this runs the ``chef`` recipe's ``build`` +
+    ``verify`` phases through the *same* pyinfra runner a bake uses, but against pyinfra's
+    ``@local`` connector — installing uv, redis, the ``chef`` CLI, and the ``chef-api`` /
+    ``chef-worker`` systemd units on the local host. Streamed events print as they arrive.
+    """
+    from chef.engine.pyinfra_runner import RunPhaseError, run_phase
+    from chef.engine.recipe import RecipeError, load_recipe
+    from chef.types import SshTarget
+
+    settings = get_settings()
+    try:
+        rcp = load_recipe(settings.recipes_dir, "chef")
+        inputs = rcp.validate_inputs({"redis_url": redis_url, "chef_source": chef_source})
+    except RecipeError as exc:
+        typer.secho(f"recipe error: {exc}", fg="red", err=True)
+        raise typer.Exit(2) from exc
+
+    # A LocalBuilder-style target: pyinfra's @local connector, no fleet.
+    target = SshTarget(connector="local", host="@local", vm_ref="local")
+    typer.secho("installing chef on @local (recipe: chef)", fg="cyan")
+
+    try:
+        for phase in ("build", "verify"):
+            typer.secho(f"== {phase}", fg="cyan")
+            run_phase(target, rcp, phase, inputs, _print_event)
+    except RunPhaseError as exc:
+        typer.secho(f"install failed: {exc}", fg="red", err=True)
+        raise typer.Exit(1) from exc
+
+    typer.secho("chef installed — chef-api + chef-worker enabled", fg="green")
 
 
 def main() -> None:
