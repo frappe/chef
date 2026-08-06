@@ -15,8 +15,7 @@ memory_megabytes = 1024
 disk_gigabytes = 20
 
 [[publish]]
-type = "atlas-base-image"
-name = "proxy-chef"
+type = "atlas-s3"                       # durable off-host copy (nothing left on the host)
 
 [[publish]]
 type = "local"

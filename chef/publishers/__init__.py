@@ -25,11 +25,14 @@ def get_publisher(type: str) -> Publisher:  # noqa: A002 - matches the recipe ke
 
         return S3Publisher()
     if type == "atlas-base-image":
-        try:
-            from chef.publishers.atlas import AtlasPublisher
-        except ImportError as exc:  # M2 — not written yet
-            raise PublisherError(
-                "the 'atlas-base-image' publisher is not available yet (arrives in M2)"
-            ) from exc
+        from chef.publishers.atlas import AtlasPublisher
+
         return AtlasPublisher()
-    raise PublisherError(f"unknown publisher type {type!r} (known: local, s3, atlas-base-image)")
+    if type == "atlas-s3":
+        from chef.publishers.atlas import AtlasS3Publisher
+
+        return AtlasS3Publisher()
+    raise PublisherError(
+        f"unknown publisher type {type!r} "
+        "(known: local, s3, atlas-base-image, atlas-s3)"
+    )

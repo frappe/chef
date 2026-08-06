@@ -41,8 +41,7 @@ def test_proxy_manifest_and_phases():
 	assert m.version == "1.0.0"
 	assert m.base_image == "ubuntu-24.04"
 	assert m.modes == ["cold"]
-	assert [p["type"] for p in m.publish] == ["atlas-base-image", "local"]
-	assert m.publish[0]["name"] == "proxy-chef"
+	assert [p["type"] for p in m.publish] == ["atlas-s3", "local"]
 
 	# proxy is cold-only: build + verify resolve to callables, no warm_arm.
 	assert callable(recipe.load_phase("build"))
