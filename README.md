@@ -7,6 +7,8 @@ result (warm **and** cold), and publishes it as an **image** to an object store 
 directly onto hosts — like Packer, but built for both humans and agents: great OpenAPI,
 machine-readable recipe manifests, and one-command install.
 
+![The Chef recipe catalog](docs/images/recipes.png)
+
 Chef's core knows nothing about any particular workload. It does not know what a bench,
 a proxy, a database, or a "site" is. All of that lives **inside recipes**. Where the VM
 comes from (**Builder**) and where the image goes (**Publisher**) are pluggable backends.
@@ -24,6 +26,20 @@ comes from (**Builder**) and where the image goes (**Publisher**) are pluggable 
 - **Publisher** *(pluggable)* — sends an image to a destination (`Local`, `S3`, `Atlas`).
 
 The Packer mapping: **Builder = builder, recipe = provisioner, Publisher = post-processor.**
+
+## A look around
+
+A recipe's manifest — base image, VM size, composition, phases, and source — alongside a
+finished bake showing its per-step results and the image it produced:
+
+<p align="center">
+  <img src="docs/images/recipe.png" width="49%" alt="Recipe detail: manifest, composition, phases, and source" />
+  <img src="docs/images/bake.png" width="49%" alt="Bake detail: per-step results and produced image" />
+</p>
+
+Every baked snapshot, cold or warm, ready to install:
+
+![The image catalog](docs/images/images.png)
 
 ## Quick start (dev, no fleet)
 
