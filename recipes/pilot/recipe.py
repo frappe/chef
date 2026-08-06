@@ -133,6 +133,14 @@ def build():
         **_AS_FRAPPE,
     )
 
+    # 10. `setup production` starts + configures nginx but leaves it DISABLED, so a
+    #     cold-booted clone never starts the reverse proxy (the frappe stack's own
+    #     systemd --user units DO come up via lingering). Enable it. Root step.
+    server.shell(
+        name="enable nginx on boot",
+        commands=["systemctl enable nginx"],
+    )
+
 
 @deploy("verify pilot golden")
 def verify():
