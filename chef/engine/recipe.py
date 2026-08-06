@@ -245,11 +245,119 @@ def _parse_manifest(path: Path) -> Manifest:
     )
 
 
-def load_recipe(recipes_dir: Path, name: str) -> Recipe:
-    path = Path(recipes_dir) / name
+def _merge(stack: list[Recipe], own: Manifest) -> Manifest:
+    """Compute the effective manifest of a composed recipe from its resolved ``stack``
+    (base-first, ending with ``own``). The composition algebra, field by field:
+
+      * ``base_image`` — the derived recipe's explicit value, else every base must agree;
+      * ``size``       — per-field **max**, so the image fits the most demanding part;
+      * ``modes``      — the derived recipe's declared modes, else the **intersection** of
+        the bases (only advertise a snapshot kind every part supports);
+      * ``tags``       — union across the stack, plus a ``composed`` marker;
+      * ``inputs``     — **union**; later-in-stack wins a name clash (``own`` is last, so it
+        overrides a base default; two bases may also intentionally share one input);
+      * ``publish``    — the derived recipe's **own** targets (they name the output artifact);
+      * ``phases``     — the derived recipe's own phases (the base phases run via the stack).
+    """
+    manifests = [leaf.manifest for leaf in stack]
+
+    images = {m.base_image for m in manifests if m.base_image}
+    if own.base_image:
+        base_image = own.base_image
+    elif len(images) == 1:
+        base_image = next(iter(images))
+    elif not images:
+        raise RecipeError(
+            f"composed recipe '{own.name}': no base_image anywhere; set one explicitly",
+            field="base_image",
+        )
+    else:
+        raise RecipeError(
+            f"composed recipe '{own.name}': bases disagree on base_image "
+            f"({', '.join(sorted(images))}); set base_image explicitly",
+            field="base_image",
+        )
+
+    size = BuildSize(
+        vcpus=max(m.size.vcpus for m in manifests),
+        memory_megabytes=max(m.size.memory_megabytes for m in manifests),
+        disk_gigabytes=max(m.size.disk_gigabytes for m in manifests),
+        build_memory_megabytes=max(m.size.build_memory_megabytes for m in manifests),
+    )
+
+    if own.modes_declared:
+        modes = list(own.modes)
+    else:
+        base_modes = [set(m.modes) for m in manifests if m.name != own.name]
+        common = set.intersection(*base_modes) if base_modes else {"cold"}
+        modes = [k for k in ("cold", "warm") if k in common] or ["cold"]
+
+    tags: list[str] = []
+    for m in manifests:
+        for t in m.tags:
+            if t not in tags:
+                tags.append(t)
+    if "composed" not in tags:
+        tags.append("composed")
+
+    inputs: dict[str, dict] = {}
+    for m in manifests:
+        inputs.update(m.inputs)
+
+    return Manifest(
+        name=own.name,
+        version=own.version,
+        description=own.description,
+        base_image=base_image,
+        modes=modes,
+        tags=tags,
+        phases=dict(own.phases),
+        size=size,
+        inputs=inputs,
+        publish=list(own.publish),
+        path=own.path,
+        compose=list(own.compose),
+        modes_declared=own.modes_declared,
+    )
+
+
+def _resolve(recipes_dir: Path, name: str, chain: tuple[str, ...]) -> Recipe:
+    """Load ``name`` and, if it composes others, its whole linearized stack.
+
+    ``chain`` is the ancestry of recipes currently being resolved, for cycle detection.
+    Bases are expanded depth-first, left-to-right, and de-duplicated by name (first
+    occurrence wins) so a diamond collapses and a shared base runs once, before its
+    dependents. The recipe's own steps always run last.
+    """
+    if name in chain:
+        raise RecipeError(
+            f"recipe compose cycle: {' -> '.join([*chain, name])}", field="compose"
+        )
+    path = recipes_dir / name
     if not path.is_dir():
         raise RecipeError(f"recipe '{name}' not found")
-    return Recipe(_parse_manifest(path))
+    manifest = _parse_manifest(path)
+    if not manifest.compose:
+        return Recipe(manifest)  # a plain leaf: stack == [self]
+
+    stack: list[Recipe] = []
+    seen: set[str] = set()
+    for base_name in manifest.compose:
+        base = _resolve(recipes_dir, base_name, (*chain, name))
+        for leaf in base.stack:
+            if leaf.manifest.name not in seen:
+                seen.add(leaf.manifest.name)
+                stack.append(leaf)
+    if manifest.name not in seen:
+        stack.append(Recipe(manifest))  # this recipe's own steps run last
+
+    recipe = Recipe(_merge(stack, manifest))
+    recipe.stack = stack
+    return recipe
+
+
+def load_recipe(recipes_dir: Path, name: str) -> Recipe:
+    return _resolve(Path(recipes_dir), name, ())
 
 
 def list_manifests(recipes_dir: Path) -> list[Manifest]:
@@ -260,9 +368,9 @@ def list_manifests(recipes_dir: Path) -> list[Manifest]:
     for child in sorted(recipes_dir.iterdir()):
         if child.is_dir() and (child / "recipe.toml").exists():
             try:
-                out.append(_parse_manifest(child))
+                out.append(load_recipe(recipes_dir, child.name).manifest)
             except RecipeError:
-                continue  # a broken recipe shouldn't hide the healthy ones in a listing
+                continue  # a broken recipe (or a missing base) shouldn't hide the healthy ones
     return out
 
 
