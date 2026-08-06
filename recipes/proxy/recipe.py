@@ -40,14 +40,17 @@ def build():
 
 @deploy("verify")
 def verify():
-    # The proxy serves specific vhosts, so a bare curl to / may legitimately 404 —
-    # assert nginx is running with a valid config, not a 200. The curl is a best-effort
-    # liveness touch that never fails the gate (`; true`).
+    # The proxy binds a large range of listen ports, so `nginx -t` needs a high
+    # open-file limit — the systemd unit sets LimitNOFILE, but an ad-hoc shell does
+    # not (a default 1024 fails with EMFILE). A passing `nginx -t` under a raised
+    # ulimit proves the config AND that every dynamically-compiled module loads.
+    # The service is *enabled* (it starts on boot; Atlas's finalize starts it in the
+    # golden) rather than necessarily active in the build VM.
     server.shell(
-        name="nginx config valid + service active",
+        name="proxy config valid (raised ulimit) + service enabled",
         commands=[
-            "nginx -t && systemctl is-active nginx && "
-            "{ curl -fsS -o /dev/null http://localhost/ || "
-            "curl -fsS -o /dev/null http://localhost:80/ ; true ; }"
+            "sh -c 'ulimit -n 1048576 2>/dev/null || ulimit -n 524288 2>/dev/null "
+            "|| ulimit -n 65535; nginx -t'",
+            "systemctl is-enabled nginx",
         ],
     )

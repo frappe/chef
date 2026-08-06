@@ -62,11 +62,14 @@ class AtlasBuilder(Builder):
 
     def acquire(self, base_image: str, size: BuildSize, *, title: str) -> SshTarget:
         public_key = self._read_public_key()
+        # Boot fat for a heavy build (bench asks for 6 GB build memory), resize down
+        # before a WARM capture. For a cold image the memory size isn't baked in — the
+        # new VM picks its own — so cold needs only the fat boot.
         created = self.client.create_bare_vm(
             title=title,
             base_image=base_image,
             vcpus=size.vcpus,
-            memory_megabytes=size.memory_megabytes,
+            memory_megabytes=size.effective_build_memory_megabytes,
             disk_gigabytes=size.disk_gigabytes,
             ssh_public_key=public_key,
             server=self.server,
@@ -111,6 +114,9 @@ class AtlasBuilder(Builder):
                 "server": server,
                 "guest_ipv6": guest_ipv6,
                 "ssh_config_dir": str(config_dir),
+                # for a warm capture: shrink the fat build VM back to its restore size.
+                "restore_memory_megabytes": size.memory_megabytes,
+                "fattened": size.effective_build_memory_megabytes > size.memory_megabytes,
             },
         )
 
