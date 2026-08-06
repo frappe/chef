@@ -1,0 +1,22 @@
+name        = "proxy"
+version     = "1.0.0"
+description = "Atlas reverse-proxy image — upload the committed proxy/ tree and run its build.sh verbatim (shim)."
+base_image  = "ubuntu-24.04"
+modes       = ["cold"]
+tags        = ["proxy", "atlas", "shim"]
+
+[phases]
+build  = "recipe:build"
+verify = "recipe:verify"
+
+[size]
+vcpus = 2
+memory_megabytes = 1024
+disk_gigabytes = 20
+
+[[publish]]
+type = "atlas-base-image"
+name = "proxy-chef"
+
+[[publish]]
+type = "local"
