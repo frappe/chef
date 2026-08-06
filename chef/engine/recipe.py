@@ -60,6 +60,7 @@ class Manifest:
     path: Path = field(default=Path("."))
     compose: list[str] = field(default_factory=list)   # base recipes this one stacks, in order
     modes_declared: bool = False    # did the .toml set `modes` (vs. the ["cold"] default)?
+    size_declared: bool = False     # did the .toml set `[size]` (vs. the BuildSize default)?
 
 
 class Recipe:
@@ -242,6 +243,7 @@ def _parse_manifest(path: Path) -> Manifest:
         path=path,
         compose=compose,
         modes_declared="modes" in data,
+        size_declared="size" in data,
     )
 
 
@@ -278,11 +280,15 @@ def _merge(stack: list[Recipe], own: Manifest) -> Manifest:
             field="base_image",
         )
 
+    # Per-field max so the image fits every part — but a pure-composition recipe that
+    # declares no `[size]` of its own must not let the BuildSize default (2 vCPU / 2 GB)
+    # inflate the result past what its bases actually need; skip its phantom default.
+    sized = [m for m in manifests if m.name != own.name or own.size_declared]
     size = BuildSize(
-        vcpus=max(m.size.vcpus for m in manifests),
-        memory_megabytes=max(m.size.memory_megabytes for m in manifests),
-        disk_gigabytes=max(m.size.disk_gigabytes for m in manifests),
-        build_memory_megabytes=max(m.size.build_memory_megabytes for m in manifests),
+        vcpus=max(m.size.vcpus for m in sized),
+        memory_megabytes=max(m.size.memory_megabytes for m in sized),
+        disk_gigabytes=max(m.size.disk_gigabytes for m in sized),
+        build_memory_megabytes=max(m.size.build_memory_megabytes for m in sized),
     )
 
     if own.modes_declared:
