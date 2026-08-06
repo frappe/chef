@@ -1,0 +1,12 @@
+name        = "webapp"
+version     = "1.0.0"
+description = "hello + a running, verified nginx — the smallest real composition."
+compose     = ["hello", "nginx"]        # stacked in order: hello's echo, then nginx install+verify
+
+# There is no recipe.py here: `webapp` is *only* a composition. base_image (ubuntu-24.04),
+# size (max of hello + nginx) and the build/verify phases are all inherited from the two
+# stacked recipes, and nginx's `worker_processes` input flows through unchanged. This is the
+# "just write a 3rd recipe that appends the previous two" case.
+
+[[publish]]                             # publish targets name the OUTPUT image, so they're
+type = "local"                          # the composed recipe's own — not inherited from a base.
