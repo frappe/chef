@@ -29,6 +29,9 @@ class RecipeSummary(BaseModel):
     base_image: str
     modes: list[str] = ["cold"]
     tags: list[str] = []
+    compose: list[str] = Field(
+        default_factory=list, description="Base recipes this one stacks, in declared order."
+    )
 
 
 class RecipeDetail(RecipeSummary):
@@ -37,6 +40,14 @@ class RecipeDetail(RecipeSummary):
     input_schema: dict = Field(default_factory=dict, description="JSON Schema for `inputs`.")
     publish: list[dict] = []
     source: dict[str, str] = Field(default_factory=dict, description="Recipe source files.")
+    lineage: list[str] = Field(
+        default_factory=list,
+        description="Every recipe run, base-first, ending with this one (self for a plain recipe).",
+    )
+    phase_sources: dict[str, list[str]] = Field(
+        default_factory=dict,
+        description="Per phase, the recipes that contribute ops, in run order.",
+    )
 
 
 class ValidationErrorOut(BaseModel):

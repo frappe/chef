@@ -56,6 +56,7 @@ def _summary(m: Manifest) -> RecipeSummary:
         base_image=m.base_image,
         modes=list(m.modes),
         tags=list(m.tags),
+        compose=list(m.compose),
     )
 
 
@@ -77,6 +78,8 @@ def _detail(recipe: Recipe) -> RecipeDetail:
         input_schema=recipe.input_schema(),
         publish=list(m.publish),
         source=recipe.source(),
+        lineage=recipe.lineage,
+        phase_sources=recipe.phase_sources(),
     )
 
 
@@ -135,13 +138,13 @@ def validate_recipe(
     except RecipeError as exc:
         errors.append(_verr(exc))
 
-    # Import each configured phase to surface import errors early (the agent fix loop).
+    # Import every configured phase across the whole stack (each base's + this recipe's own)
+    # to surface import errors early — the agent fix loop, now composition-aware.
     for phase in ("build", "verify", "warm_arm"):
-        if recipe.has_phase(phase):
-            try:
-                recipe.load_phase(phase)
-            except RecipeError as exc:
-                errors.append(_verr(exc))
+        try:
+            recipe.phase_chain(phase)
+        except RecipeError as exc:
+            errors.append(_verr(exc))
 
     return ValidateResult(ok=len(errors) == 0, errors=errors)
 
