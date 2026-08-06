@@ -58,6 +58,8 @@ class Manifest:
     inputs: dict[str, dict]         # raw [inputs.*] tables
     publish: list[dict]             # [[publish]] blocks
     path: Path = field(default=Path("."))
+    compose: list[str] = field(default_factory=list)   # base recipes this one stacks, in order
+    modes_declared: bool = False    # did the .toml set `modes` (vs. the ["cold"] default)?
 
 
 class Recipe:
@@ -170,17 +172,22 @@ def _parse_manifest(path: Path) -> Manifest:
         build_memory_megabytes=int(size_raw.get("build_memory_megabytes", 0)),
     )
     phases = data.get("phases", {})
-    for required in ("name", "version", "base_image"):
+    compose = list(data.get("compose", []))
+    # A pure-composition recipe inherits base_image + its build phase from the recipes it
+    # stacks, so those become optional once `compose` names at least one base.
+    for required in ("name", "version"):
         if not data.get(required):
             raise RecipeError(f"recipe.toml missing required key '{required}'", field=required)
-    if not phases.get("build"):
+    if not compose and not data.get("base_image"):
+        raise RecipeError("recipe.toml missing required key 'base_image'", field="base_image")
+    if not compose and not phases.get("build"):
         raise RecipeError("recipe.toml [phases] must define 'build'", field="phases.build")
 
     return Manifest(
         name=data["name"],
         version=str(data["version"]),
         description=data.get("description", ""),
-        base_image=data["base_image"],
+        base_image=data.get("base_image", ""),
         modes=list(data.get("modes", ["cold"])),
         tags=list(data.get("tags", [])),
         phases={
@@ -192,6 +199,8 @@ def _parse_manifest(path: Path) -> Manifest:
         inputs=dict(data.get("inputs", {})),
         publish=list(data.get("publish", [])),
         path=path,
+        compose=compose,
+        modes_declared="modes" in data,
     )
 
 
