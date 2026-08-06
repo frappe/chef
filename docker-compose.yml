@@ -1,0 +1,89 @@
+# Chef dev stack: `docker compose up` → api + worker + redis + minio.
+# Open http://localhost:8000/docs (API) and http://localhost:9001 (MinIO console).
+
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: chef
+      MINIO_ROOT_PASSWORD: chef-secret
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # One-shot: create the images bucket, then exit.
+  createbucket:
+    image: minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 chef chef-secret &&
+      mc mb --ignore-existing local/chef-images &&
+      mc anonymous set download local/chef-images;
+      exit 0;
+      "
+
+  chef-api:
+    build: .
+    command: ["chef", "serve", "--host", "0.0.0.0", "--port", "8000"]
+    environment:
+      CHEF_REDIS_URL: redis://redis:6379
+      CHEF_DATABASE_URL: sqlite:////data/chef.db
+      CHEF_RECIPES_DIR: /app/recipes
+      CHEF_S3_ENDPOINT_URL: http://minio:9000
+      CHEF_S3_ACCESS_KEY: chef
+      CHEF_S3_SECRET_KEY: chef-secret
+      CHEF_S3_BUCKET: chef-images
+      CHEF_CORS_ORIGINS: '["http://localhost:5173","http://localhost:8000"]'
+    ports:
+      - "8000:8000"
+    volumes:
+      - chef-data:/data
+    depends_on:
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+
+  chef-worker:
+    build: .
+    command: ["chef", "worker"]
+    environment:
+      CHEF_REDIS_URL: redis://redis:6379
+      CHEF_DATABASE_URL: sqlite:////data/chef.db
+      CHEF_RECIPES_DIR: /app/recipes
+      CHEF_S3_ENDPOINT_URL: http://minio:9000
+      CHEF_S3_ACCESS_KEY: chef
+      CHEF_S3_SECRET_KEY: chef-secret
+      CHEF_S3_BUCKET: chef-images
+    volumes:
+      - chef-data:/data
+    depends_on:
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+
+volumes:
+  minio-data:
+  chef-data:
