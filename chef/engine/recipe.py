@@ -68,6 +68,15 @@ class Recipe:
     def __init__(self, manifest: Manifest):
         self.manifest = manifest
         self.path = manifest.path
+        # The linearized recipes this one is built from, base-first, ending with self.
+        # A plain (non-composed) recipe is a stack of one; :func:`load_recipe` replaces
+        # this with the resolved stack for a ``compose = [...]`` recipe.
+        self.stack: list[Recipe] = [self]
+
+    @property
+    def lineage(self) -> list[str]:
+        """Names of every recipe in the resolved stack, base-first, ending with self."""
+        return [leaf.manifest.name for leaf in self.stack]
 
     # --- inputs ---------------------------------------------------------------
 
@@ -132,14 +141,46 @@ class Recipe:
         return fn
 
     def has_phase(self, phase: str) -> bool:
-        return bool(self.manifest.phases.get(phase, ""))
+        """True when any recipe in the stack defines ``phase`` (base or self)."""
+        return any(leaf.manifest.phases.get(phase, "") for leaf in self.stack)
 
-    def source(self) -> dict[str, str]:
-        """All human-readable source files under the recipe dir, for API display."""
+    def phase_chain(self, phase: str) -> list[tuple[str, Callable]]:
+        """The ``(recipe_name, @deploy)`` callables to run for ``phase``, in stack order:
+        each base's own phase first, this recipe's own phase last. Empties are skipped."""
+        chain: list[tuple[str, Callable]] = []
+        for leaf in self.stack:
+            fn = leaf.load_phase(phase)
+            if fn is not None:
+                chain.append((leaf.manifest.name, fn))
+        return chain
+
+    def phase_sources(self) -> dict[str, list[str]]:
+        """For each phase, the ordered recipe names that contribute ops (for the API/UI)."""
+        out: dict[str, list[str]] = {}
+        for phase in ("build", "verify", "warm_arm"):
+            names = [leaf.manifest.name for leaf in self.stack
+                     if leaf.manifest.phases.get(phase, "")]
+            if names:
+                out[phase] = names
+        return out
+
+    def _own_source(self) -> dict[str, str]:
         out: dict[str, str] = {}
         for p in sorted(self.path.rglob("*")):
             if p.is_file() and p.suffix in (".py", ".toml", ".j2", ".sh", ".conf", ".md"):
                 out[str(p.relative_to(self.path))] = p.read_text()
+        return out
+
+    def source(self) -> dict[str, str]:
+        """All human-readable source files, for API display. For a composed recipe every
+        stacked recipe's files are included, keyed ``<recipe>/<relpath>`` so the UI shows
+        exactly which recipe each file came from."""
+        if len(self.stack) == 1:
+            return self._own_source()
+        out: dict[str, str] = {}
+        for leaf in self.stack:
+            for rel, text in leaf._own_source().items():
+                out[f"{leaf.manifest.name}/{rel}"] = text
         return out
 
 
