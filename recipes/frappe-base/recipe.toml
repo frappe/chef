@@ -1,0 +1,31 @@
+name        = "frappe-base"
+version     = "0.1.0"
+description = "A Pilot golden with all 9 first-party Frappe apps installed, then DISABLED so only their DB schema remains in the base image (code inert)."
+compose     = ["pilot"]                 # inherit the whole Pilot golden (bench + site), then add + disable apps
+tags        = ["frappe", "base", "schema-only"]
+
+[phases]
+build  = "recipe:build"                 # runs AFTER pilot's build (bench + site already exist)
+verify = "recipe:verify"                # runs AFTER pilot's verify
+
+[size]
+# Installing 9 apps + building ~6 Vue frontends is fat. Boot fat, resize down before snapshot.
+# Kept within a 16 GB host's headroom (a build VM must leave RAM for the host).
+vcpus = 4
+memory_megabytes = 4096
+disk_gigabytes = 80
+build_memory_megabytes = 12288
+
+# site_name, admin_password, admin_domain are INHERITED from pilot. We override frappe_branch
+# so the baked bench runs frappe `develop` (which carries the disable-app CLI, PR #41563).
+[inputs.frappe_branch]
+type = "string"
+default = "develop"
+description = "Frappe app branch (bench.toml frappe [[apps]].branch). Pinned to develop for the disable-app CLI."
+
+[[publish]]
+type = "atlas-base-image"
+name = "frappe-base-chef"
+
+[[publish]]
+type = "local"
