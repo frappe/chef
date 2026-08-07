@@ -134,3 +134,65 @@ class AtlasS3Publisher(Publisher):
                     f"{self.upload_timeout:g}s (last s3_status={snap.get('s3_status')!r})"
                 )
             time.sleep(self.poll_interval)
+
+
+class AtlasDistributePublisher(Publisher):
+    """Distribute a snapshot to the WHOLE host fleet as a base image.
+
+    Unlike AtlasPublisher (promotes a LOCAL image on one host), this asks Atlas to
+    squash + pack the snapshot to S3 and mint a non-local image that sync-image fans
+    out to every chosen host, so the baked base LV lands on the fleet, not one box.
+    """
+
+    type = "atlas-distribute"
+    builders = ("atlas",)  # distributes an Atlas-side snapshot reference
+
+    def __init__(
+        self,
+        client: AtlasClient | None = None,
+        *,
+        active_timeout: float = _ACTIVE_TIMEOUT,
+        poll_interval: float = _POLL_INTERVAL,
+    ):
+        self.client = client or AtlasClient.from_settings()
+        self.active_timeout = active_timeout
+        self.poll_interval = poll_interval
+
+    def publish(
+        self,
+        snapshot: SnapshotRef,
+        *,
+        recipe: str,  # noqa: ARG002 - the base-image name comes from the recipe's publish block
+        version: str,  # noqa: ARG002 - Atlas versions base images itself
+        config: dict,
+    ) -> ImageLocation:
+        image_name = config.get("name")
+        if not image_name:
+            raise PublisherError(
+                "atlas-distribute publish block needs a 'name' (the base-image name)"
+            )
+        servers = config.get("servers")  # optional explicit list of Atlas Server names
+
+        self.client.publish_snapshot_as_fleet_image(
+            snapshot=snapshot.ref, image_name=image_name, servers=servers
+        )
+        self._wait_active(image_name)
+
+        return ImageLocation(
+            type="atlas-distribute",
+            uri=image_name,
+            manifest={"image_name": image_name, "snapshot": snapshot.ref},
+        )
+
+    def _wait_active(self, image_name: str) -> None:
+        deadline = time.monotonic() + self.active_timeout
+        while True:
+            image = self.client.get_image(image_name)
+            if image.get("is_active"):
+                return
+            if time.monotonic() >= deadline:
+                raise PublisherError(
+                    f"atlas image {image_name!r} did not become active within "
+                    f"{self.active_timeout:g}s"
+                )
+            time.sleep(self.poll_interval)

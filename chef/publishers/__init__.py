@@ -32,7 +32,11 @@ def get_publisher(type: str) -> Publisher:  # noqa: A002 - matches the recipe ke
         from chef.publishers.atlas import AtlasS3Publisher
 
         return AtlasS3Publisher()
+    if type == "atlas-distribute":
+        from chef.publishers.atlas import AtlasDistributePublisher
+
+        return AtlasDistributePublisher()
     raise PublisherError(
         f"unknown publisher type {type!r} "
-        "(known: local, s3, atlas-base-image, atlas-s3)"
+        "(known: local, s3, atlas-base-image, atlas-s3, atlas-distribute)"
     )
