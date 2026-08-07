@@ -109,8 +109,10 @@ def verify():
     server.shell(
         name="all 9 apps: tables present AND disabled",
         commands=[
-            f"cd {bench_dir}/sites && "
-            f"{bench_dir}/env/bin/python {_VERIFY_DEST} {site}"
+            (
+                f"cd {bench_dir}/sites && "
+                f"{bench_dir}/env/bin/python {_VERIFY_DEST} {site}"
+            ),
         ],
         _timeout=600,
         **_AS_FRAPPE,
