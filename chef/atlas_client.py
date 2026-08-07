@@ -184,6 +184,26 @@ class AtlasClient:
     def upload_image_to_s3(self, snapshot: str) -> Any:
         return self.call("upload_image_to_s3", snapshot=snapshot)
 
+    def publish_snapshot_as_fleet_image(
+        self,
+        *,
+        snapshot: str,
+        image_name: str,
+        servers: list[str] | None = None,
+    ) -> dict:
+        """Distribute a cold snapshot to the host fleet as a base image (squash+pack to
+        S3 + mint a non-local image + fan out sync-image). Returns the Atlas dict."""
+        return self.call(
+            "publish_snapshot_as_fleet_image",
+            **_drop_none(
+                {
+                    "snapshot": snapshot,
+                    "image_name": image_name,
+                    "servers": json.dumps(servers) if servers is not None else None,
+                }
+            ),
+        )
+
     def get_virtual_machine(self, name: str) -> dict:
         return self.call("get_virtual_machine", name=name)
 
