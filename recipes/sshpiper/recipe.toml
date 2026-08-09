@@ -1,0 +1,21 @@
+name        = "sshpiper"
+version     = "1.0.0"
+description = "Atlas sshpiper — native pyinfra build of sshpiper and its atlas plugin (no build.sh)."
+base_image  = "ubuntu-24.04"
+modes       = ["cold"]
+tags        = ["sshpiper", "atlas", "native"]
+
+[phases]
+build  = "recipe:build"
+verify = "recipe:verify"
+
+[size]
+vcpus = 2
+memory_megabytes = 1024
+disk_gigabytes = 20
+
+[[publish]]
+type = "atlas-s3"                       # durable off-host copy (nothing left on the host)
+
+[[publish]]
+type = "local"
