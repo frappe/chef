@@ -1,0 +1,3 @@
+[submodule "recipes/sshpiper/atlas-sshpiper/sshpiper.crypto"]
+	path = recipes/sshpiper/atlas-sshpiper/sshpiper.crypto
+	url = https://github.com/tg123/sshpiper.crypto
