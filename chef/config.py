@@ -28,6 +28,9 @@ class Settings(BaseSettings):
     # --- jobs / streaming ---
     redis_url: str = "redis://localhost:6379"
     log_stream_ttl_seconds: int = 60 * 60 * 24  # Redis Streams log retention
+    # arq's default job_timeout is 300s — far too short for a fleet bake (nginx ≈ minutes,
+    # pilot ≈ 40 min), which would otherwise be cancelled mid-build and recorded `aborted`.
+    bake_job_timeout: int = 60 * 60 * 3  # 3h ceiling for one bake on the worker
 
     # --- data store ---
     database_url: str = f"sqlite:///{_REPO_ROOT / 'chef.db'}"

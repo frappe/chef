@@ -50,3 +50,6 @@ class WorkerSettings:
     functions = [bake]
     redis_settings = redis_settings_from_url()
     on_startup = on_startup
+    # Without this, arq cancels a bake after its 300s default and the pipeline records
+    # `aborted` mid-build (releasing the scratch VM). A fleet bake needs hours, not minutes.
+    job_timeout = get_settings().bake_job_timeout
