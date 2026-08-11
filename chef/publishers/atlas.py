@@ -6,6 +6,10 @@ to Atlas's ``promote_image`` under the base-image name the recipe chose
 the image to ``is_active``, and return an ``atlas-base-image``
 :class:`~chef.types.ImageLocation` whose ``uri`` *is* that base-image name.
 
+With ``distribute = true`` in the publish block it also fans the promoted image out to the
+rest of the fleet host-to-host (no S3, via Atlas ``distribute_image``) before returning, so
+one recipe block bakes *and* propagates the golden.
+
 It builds its own Atlas client from :func:`chef.config.get_settings` (injectable for tests);
 nothing here touches the network at import time.
 """
@@ -56,10 +60,24 @@ class AtlasPublisher(Publisher):
         self.client.promote_image(snapshot=snapshot.ref, image_name=image_name)
         self._wait_active(image_name)
 
+        # Opt-in fleet propagation (``distribute = true`` in the publish block): fan the
+        # freshly-promoted LOCAL image out to the rest of the fleet host-to-host, no S3.
+        # Atlas backgrounds the fan-out on its ``long`` queue, so this hands it off and
+        # returns — the base LV is already on this build host, so the bake is complete;
+        # the other hosts converge in the background. ``servers`` (optional) pins targets.
+        distributed_to = None
+        if config.get("distribute"):
+            handle = self.client.distribute_image(image_name, servers=config.get("servers"))
+            distributed_to = handle.get("servers")
+
         return ImageLocation(
             type="atlas-base-image",
             uri=image_name,
-            manifest={"image_name": image_name, "snapshot": snapshot.ref},
+            manifest={
+                "image_name": image_name,
+                "snapshot": snapshot.ref,
+                "distributed_to": distributed_to,
+            },
         )
 
     def _wait_active(self, image_name: str) -> None:

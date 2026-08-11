@@ -38,6 +38,7 @@ description = "Frappe app branch (bench.toml frappe [[apps]].branch)."
 [[publish]]
 type = "atlas-base-image"
 name = "pilot-chef"
+distribute = true                       # after promoting on the build host, fan out to the rest of the fleet host-to-host (no S3)
 
 [[publish]]
 type = "local"
