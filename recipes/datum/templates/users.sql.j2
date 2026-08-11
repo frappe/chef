@@ -1,0 +1,7 @@
+CREATE USER OR REPLACE datum IDENTIFIED BY '{{ datum_password }}' HOST LOCAL;
+REVOKE ALL ON *.* FROM datum;
+GRANT SELECT, INSERT, CREATE DATABASE, CREATE TABLE ON {{ database }}.* TO datum;
+
+CREATE USER OR REPLACE insights IDENTIFIED BY '{{ insights_password }}';
+REVOKE ALL ON *.* FROM insights;
+GRANT SELECT, CREATE VIEW, DROP VIEW ON {{ database }}.* TO insights;

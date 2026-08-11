@@ -1,0 +1,48 @@
+name        = "datum"
+version     = "0.1.0"
+description = "The Frappe fleet's telemetry service: ClickHouse, its datum and insights users, and the datum-api systemd unit."
+base_image  = "ubuntu-24.04"
+modes       = ["cold"]
+tags        = ["telemetry", "clickhouse", "frappe"]
+
+[phases]
+build  = "recipe:build"
+verify = "recipe:verify"
+
+[size]
+vcpus = 2
+memory_megabytes = 4096
+disk_gigabytes = 40
+
+[inputs.datum_source]
+type        = "string"
+default     = "https://github.com/frappe/datum.git"
+description = "Git remote the service is cloned from."
+
+[inputs.datum_branch]
+type        = "string"
+default     = "main"
+description = "Branch to check out."
+
+[inputs.jwt_public_key]
+type        = "string"
+default     = ""
+description = "PEM public key tokens are checked against. Empty bakes no key, so every /v1 call is a 401 until one lands in .dev/central.pub."
+
+[inputs.oidc_issuer]
+type        = "string"
+default     = ""
+description = "DATUM_OIDC_ISSUER — fetch keys from an issuer instead of a baked PEM."
+
+[inputs.listen_port]
+type        = "string"
+default     = "8000"
+description = "Port uvicorn binds on 127.0.0.1."
+
+[inputs.workers]
+type        = "string"
+default     = "2"
+description = "uvicorn workers. Rate-limit counts are per worker, so this multiplies the real limit."
+
+[[publish]]
+type = "local"
