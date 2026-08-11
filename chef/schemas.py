@@ -156,6 +156,21 @@ class InstallResult(BaseModel):
     vm: str | None = None
 
 
+class PropagateRequest(BaseModel):
+    servers: list[str] | None = Field(
+        default=None,
+        description="Target Atlas Server names; every other Active host if omitted.",
+    )
+
+
+class PropagateResult(BaseModel):
+    ok: bool
+    image: str = Field(default="", description="The Atlas base-image name being fanned out.")
+    source: str = Field(default="", description="The host that holds the image and serves it.")
+    servers: list[str] = Field(default_factory=list, description="Hosts the fan-out targets.")
+    detail: str = ""
+
+
 # --- errors ------------------------------------------------------------------
 
 

@@ -204,6 +204,24 @@ class AtlasClient:
             ),
         )
 
+    def distribute_image(self, image: str, servers: list[str] | None = None) -> dict:
+        """Fan an already-promoted LOCAL base image out to the fleet host-to-host over HTTP
+        — no object store. The no-bucket counterpart to
+        :meth:`publish_snapshot_as_fleet_image`: Atlas ships the image's base LV straight
+        from its home host to every other Active host (or ``servers`` if given), reusing its
+        ``sync-image`` verb. Atlas runs the fan-out on its background (``long``) queue and
+        returns the ``{image, source, servers}`` handle immediately — call it right after a
+        promote to propagate the golden across the fleet without a bucket."""
+        return self.call(
+            "distribute_image",
+            **_drop_none(
+                {
+                    "image": image,
+                    "servers": json.dumps(servers) if servers is not None else None,
+                }
+            ),
+        )
+
     def get_virtual_machine(self, name: str) -> dict:
         return self.call("get_virtual_machine", name=name)
 

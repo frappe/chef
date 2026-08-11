@@ -18,5 +18,11 @@ export function useImages() {
     }
   }
 
-  return { images, loading, error, load }
+  // Fire the fleet fan-out for one image; Atlas backgrounds the actual sync, so this
+  // resolves as soon as the fan-out is queued and returns its {image, source, servers}.
+  async function propagate(id, servers = null) {
+    return imagesApi.propagate(id, servers)
+  }
+
+  return { images, loading, error, load, propagate }
 }

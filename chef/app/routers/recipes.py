@@ -166,26 +166,15 @@ def get_recipe(name: str = Path(..., description="Recipe directory name.")) -> R
 
 
 async def _enqueue_bake(bake_id: str, settings: Settings) -> bool:
-    """Enqueue the arq ``bake`` job with ``_job_id == bake_id``. False if redis is down."""
-    from arq import create_pool
-    from arq.connections import RedisSettings
+    """Enqueue the arq ``bake`` job (id == bake id, so it can be aborted). False if redis
+    is down — the durable row still stands. Delegates to the shared enqueue path so a UI
+    bake and a CLI ``--async`` bake run on the same worker."""
+    from chef.worker.settings import enqueue_bake
 
-    try:
-        pool = await create_pool(RedisSettings.from_dsn(settings.redis_url))
-    except Exception:  # noqa: BLE001 - redis down: keep the row, report queued
-        logger.warning("enqueue: cannot reach redis for bake %s", bake_id, exc_info=True)
-        return False
-    try:
-        await pool.enqueue_job("bake", bake_id, _job_id=bake_id)
-        return True
-    except Exception:  # noqa: BLE001
-        logger.warning("enqueue: failed for bake %s", bake_id, exc_info=True)
-        return False
-    finally:
-        try:
-            await pool.aclose()
-        except Exception:  # noqa: BLE001
-            pass
+    ok = await enqueue_bake(bake_id, settings.redis_url)
+    if not ok:
+        logger.warning("enqueue: could not reach redis for bake %s", bake_id)
+    return ok
 
 
 @router.post(

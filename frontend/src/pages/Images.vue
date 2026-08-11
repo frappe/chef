@@ -12,6 +12,14 @@
       />
     </div>
 
+    <div
+      v-if="note || noteError"
+      class="mb-4 rounded-md px-3 py-2 text-p-sm"
+      :class="noteError ? 'bg-surface-red-2 text-ink-red-8' : 'bg-surface-blue-2 text-ink-blue-8'"
+    >
+      {{ noteError || note }}
+    </div>
+
     <div v-if="loading && !images.length" class="space-y-2">
       <div
         v-for="i in 4"
@@ -34,6 +42,7 @@
             <th class="px-4 py-2.5 font-medium">Location</th>
             <th class="px-4 py-2.5 font-medium">Provenance</th>
             <th class="px-4 py-2.5 font-medium">Created</th>
+            <th class="px-4 py-2.5 text-right font-medium">Actions</th>
           </tr>
         </thead>
         <tbody class="divide-y divide-outline-gray-2">
@@ -60,6 +69,17 @@
               <span v-else class="text-ink-gray-4">—</span>
             </td>
             <td class="px-4 py-3 text-ink-gray-6">{{ fmtDateTime(image.created_at) }}</td>
+            <td class="px-4 py-3 text-right">
+              <Button
+                v-if="canPropagate(image)"
+                variant="subtle"
+                icon-left="lucide-share-2"
+                :loading="propagatingId === image.id"
+                label="Propagate"
+                @click="onPropagate(image)"
+              />
+              <span v-else class="text-ink-gray-4" title="Only a promoted atlas-base-image can be fanned out">—</span>
+            </td>
           </tr>
         </tbody>
       </table>
@@ -76,13 +96,40 @@
 </template>
 
 <script setup>
-import { onMounted } from 'vue'
+import { onMounted, ref } from 'vue'
 import { Badge, Button, ErrorMessage } from 'frappe-ui'
 import EmptyState from '@/components/EmptyState.vue'
 import { useImages } from '@/composables/useImages'
 import { fmtBytes, fmtDateTime, kindTheme } from '@/utils/format'
 
-const { images, loading, error, load } = useImages()
+const { images, loading, error, load, propagate } = useImages()
+
+const propagatingId = ref('')
+const note = ref('')
+const noteError = ref('')
+
+// Only a promoted local base image (atlas-base-image) can be fanned out host-to-host; a
+// from-URL/s3/local artifact is placed differently, so the button is hidden for those.
+function canPropagate(image) {
+  return image.location?.type === 'atlas-base-image'
+}
+
+async function onPropagate(image) {
+  propagatingId.value = image.id
+  note.value = ''
+  noteError.value = ''
+  try {
+    const result = await propagate(image.id)
+    const servers = result.servers || []
+    note.value =
+      `Propagating ${result.image} from ${result.source} → ${servers.length} host(s). ` +
+      `Atlas is syncing them in the background.`
+  } catch (caught) {
+    noteError.value = caught.message || 'Failed to start propagation'
+  } finally {
+    propagatingId.value = ''
+  }
+}
 
 function provenanceText(image) {
   const p = image.provenance || {}
