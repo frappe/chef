@@ -93,12 +93,20 @@ def bake(
     ),
     mode: str = typer.Option("cold", help="cold | warm | both."),
     builder: Optional[str] = typer.Option(None, help="Override the default builder."),
+    background: bool = typer.Option(
+        False,
+        "--async/--inline",
+        "-a",
+        help="Enqueue on the arq worker (background) instead of running inline. "
+        "Needs redis + a running `chef worker`.",
+    ),
 ) -> None:
-    """Run a recipe inline (no redis/worker) and print its events to the console.
+    """Run a recipe and print its events to the console.
 
-    Creates the bake row, runs the *same* pipeline synchronously via
-    ``run_bake_inline``, then prints the collected events. Exit code mirrors the
-    terminal ``done`` event.
+    Default (``--inline``): creates the bake row and runs the *same* pipeline
+    synchronously via ``run_bake_inline`` — no redis/worker — with the exit code mirroring
+    the terminal ``done`` event. With ``--async``: enqueues the bake on the arq worker
+    (the same path the UI/API use) and returns the bake id to follow over the API.
     """
     from chef.engine.recipe import RecipeError, load_recipe
     from chef.store import BakeRecord, create_bake, init_db
@@ -131,14 +139,65 @@ def bake(
             status="queued",
         )
     )
-    typer.secho(f"baking {recipe} (bake {bake_id}, builder={chosen_builder})", fg="cyan")
 
+    if background:
+        import asyncio
+
+        from chef.worker.settings import enqueue_bake
+
+        if not asyncio.run(enqueue_bake(bake_id, settings.redis_url)):
+            typer.secho(
+                "could not enqueue — is redis up and `chef worker` running?", fg="red", err=True
+            )
+            raise typer.Exit(1)
+        typer.secho(f"queued bake {bake_id} on the worker (builder={chosen_builder})", fg="green")
+        typer.secho(
+            f"follow: GET /bakes/{bake_id}  ·  logs: GET /bakes/{bake_id}/logs", fg="cyan"
+        )
+        raise typer.Exit(0)
+
+    typer.secho(f"baking {recipe} (bake {bake_id}, builder={chosen_builder})", fg="cyan")
     exit_code = 0
     for event in run_bake_inline(bake_id):
         _print_event(event)
         if event.get("type") == "done":
             exit_code = int(event.get("exit_code", 0) or 0)
     raise typer.Exit(exit_code)
+
+
+@app.command()
+def propagate(
+    image: str = typer.Argument(
+        ..., help="The Atlas base-image name to fan out (e.g. 'pilot-chef')."
+    ),
+    server: Optional[list[str]] = typer.Option(
+        None,
+        "--server",
+        "-s",
+        help="Target Atlas Server name (repeatable); every other Active host if omitted.",
+    ),
+) -> None:
+    """Fan a promoted Atlas base image out to the rest of the fleet host-to-host (no S3).
+
+    Triggers Atlas's ``distribute_image`` over its service API; Atlas runs the squash +
+    serve + ``sync-image`` fan-out on its own background worker, so this returns the
+    ``{image, source, servers}`` handle at once. The CLI twin of the Images-page Propagate
+    button and the ``distribute = true`` publish block.
+    """
+    from chef.atlas_client import AtlasClient, AtlasError
+
+    try:
+        handle = AtlasClient.from_settings().distribute_image(image, servers=server or None)
+    except AtlasError as exc:
+        typer.secho(f"propagate failed: {exc.message}", fg="red", err=True)
+        raise typer.Exit(1) from exc
+
+    servers = handle.get("servers", [])
+    typer.secho(
+        f"propagating {handle.get('image', image)} from {handle.get('source', '?')} "
+        f"→ {len(servers)} host(s): {', '.join(servers) or '(none)'}",
+        fg="green",
+    )
 
 
 @app.command()
