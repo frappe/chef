@@ -15,8 +15,8 @@ from pyinfra.operations import apt, files, server
 _TEMPLATES = os.path.join(os.path.dirname(__file__), "templates")
 _UNIT = os.path.join(_TEMPLATES, "datum.service.j2")
 _ENV = os.path.join(_TEMPLATES, "datum.env.j2")
-_USERS_SQL = os.path.join(_TEMPLATES, "users.sql.j2")
 _ACCESS = os.path.join(_TEMPLATES, "access-management.xml.j2")
+_MIGRATE = os.path.join(_TEMPLATES, "migrate.sh.j2")
 
 SERVICE_USER = "frappe"
 BASE_DIR = f"/home/{SERVICE_USER}/datum"
@@ -28,7 +28,7 @@ SYSTEMD_USER_DIR = f"/home/{SERVICE_USER}/.config/systemd/user"
 UNIT_FILE = f"{SYSTEMD_USER_DIR}/datum.service"
 
 ACCESS_FILE = "/etc/clickhouse-server/users.d/access-management.xml"
-USERS_SQL_FILE = "/root/users.sql"
+MIGRATE_SCRIPT = "/root/datum-migrate.sh"
 
 DATABASE = "datum"
 TABLE = "samples"
@@ -47,7 +47,9 @@ _REPO = f"deb [signed-by={_KEYRING}] https://packages.clickhouse.com/deb stable 
 
 
 def make_password() -> str:
-    return secrets.token_urlsafe(24)
+    """Hex, not urlsafe: datum-migrate refuses a password containing `--`, and
+    token_urlsafe emits one about once in every hundred and twenty."""
+    return secrets.token_hex(24)
 
 
 def create_directories():
@@ -98,8 +100,8 @@ def install_clickhouse():
     )
 
 
-def create_clickhouse_users(datum_password: str, insights_password: str):
-    # CREATE USER needs SQL-driven access control, which a stock install has off.
+def enable_access_management():
+    """datum-migrate issues CREATE USER, which a stock install does not allow."""
     files.template(
         name="enable SQL access management for default",
         src=_ACCESS,
@@ -112,24 +114,32 @@ def create_clickhouse_users(datum_password: str, insights_password: str):
         restarted=True,
         _retries=3,
     )
-    # Written 0600 and deleted after: pyinfra logs the commands it runs, so the
-    # passwords never go on a command line.
+
+
+def run_migrations(insights_password: str):
+    """The database, both tables and both ClickHouse users. datum-api issues no DDL,
+    so nothing exists until this runs — and its lifespan refuses to start without it.
+
+    Written 0600 and deleted after: pyinfra logs the command it runs, so the password
+    goes in the file rather than on the command line.
+    """
     files.template(
-        name="write the user SQL",
-        src=_USERS_SQL,
-        dest=USERS_SQL_FILE,
-        mode="600",
-        database=DATABASE,
-        datum_password=datum_password,
+        name="write the migrate script",
+        src=_MIGRATE,
+        dest=MIGRATE_SCRIPT,
+        mode="700",
+        base_dir=BASE_DIR,
+        env_file=ENV_FILE,
         insights_password=insights_password,
     )
     server.shell(
-        name="create the datum and insights users",
-        commands=[f"clickhouse-client --queries-file {USERS_SQL_FILE}"],
+        name="datum-migrate",
+        commands=[MIGRATE_SCRIPT],
         _retries=6,
         _retry_delay=5,
+        _timeout=300,
     )
-    files.file(name="remove the user SQL", path=USERS_SQL_FILE, present=False)
+    files.file(name="remove the migrate script", path=MIGRATE_SCRIPT, present=False)
 
 
 def install_uv():
@@ -187,8 +197,6 @@ def write_env_file(datum_password: str):
         user=SERVICE_USER,
         group=SERVICE_USER,
         mode="640",
-        database=DATABASE,
-        table=TABLE,
         datum_password=datum_password,
         jwt_public_key=public_key,
         public_key_file=PUBLIC_KEY_FILE,
@@ -242,10 +250,11 @@ def build():
 
     create_directories()
     install_clickhouse()
-    create_clickhouse_users(datum_password, insights_password)
+    enable_access_management()
     install_uv()
     clone_datum()
     write_env_file(datum_password)
+    run_migrations(insights_password)
     install_unit()
     report(datum_password, insights_password)
 
@@ -278,8 +287,11 @@ def verify():
         _retry_delay=5,
     )
     server.shell(
-        name="ensure_schema created the table",
-        commands=[f"clickhouse-client --query 'EXISTS TABLE {DATABASE}.{TABLE}' | grep -qx 1"],
+        name="the migrations created the tables",
+        commands=[
+            f"clickhouse-client --query 'EXISTS TABLE {DATABASE}.{TABLE}' | grep -qx 1",
+            f"clickhouse-client --query 'EXISTS TABLE {DATABASE}.resources' | grep -qx 1",
+        ],
         _retries=6,
         _retry_delay=5,
     )

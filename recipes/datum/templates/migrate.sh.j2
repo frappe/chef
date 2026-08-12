@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# datum-migrate reads the connection from the env file and creates both ClickHouse
+# users. It connects as `default`, because `datum` is what it is about to create.
+set -a
+. {{ env_file }}
+set +a
+
+exec {{ base_dir }}/.venv/bin/datum-migrate \
+    --insights-user-password '{{ insights_password }}'
