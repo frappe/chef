@@ -107,7 +107,7 @@ class FakePublisher(Publisher):
         )
 
 
-def _fake_run_phase(target, recipe, phase, inputs, emit):
+def _fake_run_phase(target, recipe, phase, inputs, emit, releases=None):
     emit(step_event(f"{phase}:op-a", 0, 2, StepState.changed))
     emit(step_event(f"{phase}:op-b", 1, 2, StepState.no_change))
     emit(line_event(f"ran {phase}"))
@@ -170,7 +170,7 @@ def test_bake_inline_records_failure(chef_env, monkeypatch):
 
     monkeypatch.setattr(bake_job, "get_builder", lambda name: fake_builder)
 
-    def _boom(target, recipe, phase, inputs, emit):
+    def _boom(target, recipe, phase, inputs, emit, releases=None):
         raise RuntimeError("build blew up")
 
     monkeypatch.setattr(bake_job, "run_phase", _boom)
