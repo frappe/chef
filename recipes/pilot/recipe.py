@@ -5,9 +5,13 @@
 # headlessly; the load-bearing lessons (each a step below):
 #   1. install.sh is TWO invocations now: as ROOT it creates the `frappe` user + the
 #      system stack + enables systemd lingering (so `systemctl --user` units survive a
-#      snapshot boot); as FRAPPE it installs the pilot CLI. Running only the frappe half
+#      snapshot boot); as FRAPPE it installs pilot itself. Running only the frappe half
 #      (as Atlas's old build.sh did) leaves no lingering/XDG_RUNTIME_DIR and breaks
-#      production setup.
+#      production setup. We keep the ROOT half but replace the FRAPPE half: install.sh's
+#      default fetch grabs the *latest* release (unpinnable), so to bake a specific,
+#      reproducible pilot **release** we install the pinned tag's release tarball directly
+#      (mirroring install.sh's `install_for_user`). The pinned ref comes from the
+#      release-tracking store via `host.data["chef_releases"]["frappe/pilot"]`.
 #   2. the Ubuntu cloud rootfs ships with setuid bits stripped — restore them or `sudo`
 #      fails ("must be owned by uid 0 and have the setuid bit set").
 #   3. `pilot setup production` guards on `stdin.isatty()`; over SSH there is no TTY, so
@@ -25,11 +29,49 @@ from pyinfra.api import deploy
 from pyinfra.operations import apt, files, server
 
 _INSTALL_URL = "https://raw.githubusercontent.com/frappe/pilot/develop/install.sh"
+_PILOT_REPO = "frappe/pilot"            # the repo whose release this recipe pins ([[track]])
 _BENCH = "atlas"
 _BENCH_DIR = f"/home/frappe/pilot/benches/{_BENCH}"
 
 # run a command as the frappe user through a login shell
 _AS_FRAPPE = {"_su_user": "frappe", "_use_su_login": True}
+
+
+def _pinned_install_script(ref: str) -> str:
+    """Install a specific pilot release from its prebuilt tarball, as the frappe user.
+
+    A faithful, pinned stand-in for install.sh's ``install_for_user``: it fetches the
+    tagged ``pilot.tar.gz`` release asset (instead of install.sh's unpinnable "latest"
+    fetch), then reproduces the same uv / PATH / admin-venv setup. The ROOT half of
+    install.sh (system stack, frappe user, lingering) still runs unchanged in step 3.
+    """
+    tarball = f"https://github.com/{_PILOT_REPO}/releases/download/{ref}/pilot.tar.gz"
+    return f"""set -eu
+PILOT_DIR="$HOME/pilot"
+# --- pinned fetch: the tagged release tarball, extracted fresh (no 'latest' contamination)
+mkdir -p "$PILOT_DIR"
+tmp="$(mktemp)"
+curl -fsSL --proto '=https' --tlsv1.2 "{tarball}" -o "$tmp"
+tar -xzf "$tmp" -C "$PILOT_DIR"
+rm -f "$tmp" "$PILOT_DIR/bench"
+chmod +x "$PILOT_DIR/bin/pilot"
+# --- uv (mirrors install.sh ensure_uv)
+command -v uv >/dev/null 2>&1 || curl -LsSf https://astral.sh/uv/install.sh | sh
+export PATH="$HOME/.local/bin:$PILOT_DIR/bin:$PATH"
+# --- pilot on PATH for future login shells (later steps run via `su - frappe`)
+for rc in "$HOME/.profile" "$HOME/.bashrc"; do
+  grep -qF 'pilot/bin' "$rc" 2>/dev/null || echo 'export PATH="$HOME/pilot/bin:$PATH"' >> "$rc"
+done
+# --- admin venv (mirrors install.sh ensure_admin_venv)
+venv="$PILOT_DIR/.admin-venv"
+if [ ! -f "$venv/bin/python" ]; then
+  uv venv "$venv" --quiet
+  deps="$(python3 -c "import tomllib;d=tomllib.load(open('$PILOT_DIR/pyproject.toml','rb'));print(' '.join(d.get('project',{{}}).get('optional-dependencies',{{}}).get('admin',[])))" 2>/dev/null || true)"
+  [ -z "$deps" ] && deps="flask>=3.0 psutil>=5.9 pymysql>=1.1 gunicorn>=21.2 pyjwt[crypto]>=2.8"
+  uv pip install --python "$venv/bin/python" --quiet $deps
+fi
+echo "pilot {ref} installed to $PILOT_DIR"
+"""
 
 
 @deploy("build pilot golden")
@@ -38,6 +80,15 @@ def build():
     site = host.data.get("site_name", "site.local")
     admin_domain = host.data.get("admin_domain", "admin.local")
     frappe_branch = host.data.get("frappe_branch", "version-16")
+
+    # The pinned pilot release, resolved from the release-tracking store by the pipeline.
+    pin = host.data.get("chef_releases", {}).get(_PILOT_REPO, {})
+    pilot_ref = pin.get("ref")
+    if not pilot_ref:
+        raise RuntimeError(
+            f"pilot recipe needs a pinned release for {_PILOT_REPO} — none found in "
+            f"host.data['chef_releases']. Pin one: `chef releases set {_PILOT_REPO} <tag>`."
+        )
 
     # 1. restore the setuid bits the cloud rootfs strips (sudo/su/passwd/… need them).
     server.shell(
@@ -67,10 +118,11 @@ def build():
         _retry_delay=15,
     )
 
-    # 4. install.sh as FRAPPE — the pilot CLI onto the frappe user's PATH.
+    # 4. install the PINNED pilot release as FRAPPE (release tarball, not install.sh's
+    #    unpinnable "latest") — reproduces install.sh's install_for_user around that fetch.
     server.shell(
-        name="pilot install.sh as frappe (the pilot CLI)",
-        commands=[f"curl -fsSL {_INSTALL_URL} | bash"],
+        name=f"install pinned pilot {pilot_ref} (release tarball)",
+        commands=[_pinned_install_script(pilot_ref)],
         _timeout=600,
         _retries=2,
         _retry_delay=15,

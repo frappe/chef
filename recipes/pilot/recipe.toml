@@ -35,6 +35,10 @@ type = "string"
 default = "version-16"
 description = "Frappe app branch (bench.toml frappe [[apps]].branch)."
 
+[[track]]
+repo = "frappe/pilot"                   # the pilot release baked in; pin it via the
+                                        # Releases page / `chef releases set frappe/pilot <tag>`.
+
 [[publish]]
 type = "atlas-base-image"
 name = "pilot-chef"
