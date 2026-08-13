@@ -29,6 +29,23 @@
 
         <div class="h-px bg-outline-gray-2" />
 
+        <!-- Per-bake release overrides -->
+        <div v-if="trackedReleases.length" class="space-y-4">
+          <div>
+            <p class="text-sm font-medium text-ink-gray-8">Releases</p>
+            <p class="text-xs text-ink-gray-5">Override tracked pins for this bake only.</p>
+          </div>
+          <div v-for="release in trackedReleases" :key="release.repo">
+            <FormControl
+              v-model="releaseOverrides[release.repo]"
+              type="text"
+              :label="release.repo"
+              :placeholder="release.ref || 'not pinned'"
+            />
+          </div>
+        </div>
+        <div v-if="trackedReleases.length" class="h-px bg-outline-gray-2" />
+
         <!-- Mode + builder -->
         <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div>
@@ -92,6 +109,7 @@ const open = computed({
 })
 
 const values = reactive({})
+const releaseOverrides = reactive({})
 const mode = ref('cold')
 const builder = ref('')
 const error = ref('')
@@ -139,6 +157,8 @@ const builderOptions = [
   { label: 'atlas', value: 'atlas' },
 ]
 
+const trackedReleases = computed(() => props.recipe.tracked || [])
+
 // (Re)seed the form whenever the dialog opens.
 watch(
   () => props.modelValue,
@@ -149,6 +169,13 @@ watch(
     for (const field of fields.value) {
       values[field.key] =
         field.default != null ? field.default : field.control === 'checkbox' ? false : ''
+    }
+    const tracked = props.recipe.tracked || []
+    for (const key of Object.keys(releaseOverrides)) {
+      if (!tracked.some((release) => release.repo === key)) delete releaseOverrides[key]
+    }
+    for (const release of tracked) {
+      releaseOverrides[release.repo] = release.ref || ''
     }
     const modes = props.recipe.modes || ['cold']
     mode.value = modes.includes(mode.value) ? mode.value : modes[0]
@@ -174,12 +201,24 @@ function collectInputs() {
   return inputs
 }
 
+// Per-bake release overrides: only repos whose field was changed from the current pin.
+function collectReleases() {
+  const releases = {}
+  for (const release of props.recipe.tracked || []) {
+    const override = String(releaseOverrides[release.repo] || '').trim()
+    if (override && override !== (release.ref || '')) releases[release.repo] = override
+  }
+  return releases
+}
+
 async function validate() {
   validating.value = true
   error.value = ''
   validation.value = null
   try {
-    validation.value = await recipesApi.validate(props.recipe.name, collectInputs())
+    validation.value = await recipesApi.validate(
+      props.recipe.name, collectInputs(), collectReleases(),
+    )
   } catch (caught) {
     error.value = caught.message || 'Validation request failed'
   } finally {
@@ -191,7 +230,9 @@ async function submit() {
   baking.value = true
   error.value = ''
   try {
+    const releases = collectReleases()
     const payload = { inputs: collectInputs(), mode: mode.value }
+    if (Object.keys(releases).length) payload.releases = releases
     if (builder.value) payload.builder = builder.value
     const result = await recipesApi.bake(props.recipe.name, payload)
     emit('baked', result.bake_id)

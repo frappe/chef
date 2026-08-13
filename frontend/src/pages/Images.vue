@@ -40,6 +40,7 @@
             <th class="px-4 py-2.5 font-medium">Kind</th>
             <th class="px-4 py-2.5 font-medium">Size</th>
             <th class="px-4 py-2.5 font-medium">Location</th>
+            <th class="px-4 py-2.5 font-medium">Release</th>
             <th class="px-4 py-2.5 font-medium">Provenance</th>
             <th class="px-4 py-2.5 font-medium">Created</th>
             <th class="px-4 py-2.5 text-right font-medium">Actions</th>
@@ -63,6 +64,20 @@
               <div class="max-w-[16rem] truncate text-xs text-ink-gray-5" :title="image.location?.uri">
                 {{ image.location?.uri }}
               </div>
+            </td>
+            <td class="px-4 py-3 text-xs">
+              <div v-if="releasesOf(image).length" class="flex flex-col items-start gap-1">
+                <span
+                  v-for="release in releasesOf(image)"
+                  :key="release.repo"
+                  class="inline-flex max-w-full items-center gap-1 rounded-md bg-surface-gray-2 px-2 py-0.5 text-ink-gray-7"
+                  :title="release.sha"
+                >
+                  <span class="truncate font-mono">{{ release.repo }}</span>
+                  <span class="shrink-0">@ {{ release.ref }}</span>
+                </span>
+              </div>
+              <span v-else class="text-ink-gray-4">—</span>
             </td>
             <td class="px-4 py-3 text-xs text-ink-gray-6">
               <span v-if="provenanceText(image)">{{ provenanceText(image) }}</span>
@@ -138,6 +153,17 @@ function provenanceText(image) {
   if (p.host || p.server) parts.push(p.host || p.server)
   if (p.bake_id || image.bake_id) parts.push((p.bake_id || image.bake_id).slice(0, 8))
   return parts.join(' · ')
+}
+
+// image.provenance.releases: { repo: { ref, sha } } baked into this snapshot.
+function releasesOf(image) {
+  const releases = image.provenance?.releases
+  if (!releases) return []
+  return Object.entries(releases).map(([repo, info]) => ({
+    repo,
+    ref: info?.ref || '?',
+    sha: info?.sha || '',
+  }))
 }
 
 onMounted(() => load())

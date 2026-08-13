@@ -84,6 +84,7 @@ const mobileOpen = ref(false)
 const navItems = [
   { label: 'Recipes', to: '/', icon: 'lucide-book-open', match: ['Recipes', 'RecipeDetail'] },
   { label: 'Images', to: '/images', icon: 'lucide-hard-drive', match: ['Images'] },
+  { label: 'Releases', to: '/releases', icon: 'lucide-tag', match: ['Releases'] },
 ]
 
 function isActive(item) {
@@ -96,6 +97,8 @@ const heading = computed(() => {
       return route.params.name
     case 'Images':
       return 'Images'
+    case 'Releases':
+      return 'Releases'
     case 'BakeDetail':
       return `Bake ${String(route.params.id).slice(0, 12)}`
     default:

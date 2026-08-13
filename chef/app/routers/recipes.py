@@ -25,6 +25,7 @@ from chef.engine.recipe import (
     load_recipe,
     recipe_template,
 )
+from chef.releases import ReleaseError, resolve_ref
 from chef.schemas import (
     BakeAccepted,
     BakeCreate,
@@ -33,11 +34,12 @@ from chef.schemas import (
     RecipeSummary,
     SizeOut,
     TemplateOut,
+    TrackedReleaseOut,
     ValidateRequest,
     ValidateResult,
     ValidationErrorOut,
 )
-from chef.store import BakeRecord, create_bake, find_bake_by_idempotency
+from chef.store import BakeRecord, create_bake, find_bake_by_idempotency, get_pin
 from chef.types import BakeState
 
 logger = logging.getLogger("chef.recipes")
@@ -69,6 +71,20 @@ def _size_out(m: Manifest) -> SizeOut:
     )
 
 
+def _tracked(recipe: Recipe) -> list[TrackedReleaseOut]:
+    """Join the recipe's tracked repos with their current store pin (nulls if unpinned)."""
+    out: list[TrackedReleaseOut] = []
+    for repo in recipe.tracked_repos():
+        pin = get_pin(repo)
+        out.append(TrackedReleaseOut(
+            repo=repo,
+            ref=(pin.ref or None) if pin else None,
+            sha=(pin.sha or None) if pin else None,
+            resolved_at=pin.resolved_at if pin else None,
+        ))
+    return out
+
+
 def _detail(recipe: Recipe) -> RecipeDetail:
     m = recipe.manifest
     return RecipeDetail(
@@ -77,6 +93,7 @@ def _detail(recipe: Recipe) -> RecipeDetail:
         size=_size_out(m),
         input_schema=recipe.input_schema(),
         publish=list(m.publish),
+        tracked=_tracked(recipe),
         source=recipe.source(),
         lineage=recipe.lineage,
         phase_sources=recipe.phase_sources(),
@@ -85,6 +102,44 @@ def _detail(recipe: Recipe) -> RecipeDetail:
 
 def _verr(exc: RecipeError) -> ValidationErrorOut:
     return ValidationErrorOut(**exc.as_dict())
+
+
+def _release_errors(
+    recipe: Recipe, overrides: dict[str, str], *, resolve: bool = True
+) -> list[ValidationErrorOut]:
+    """Validate every tracked repo's effective release the way a bake would resolve it.
+
+    The effective ref is the per-bake override if given, else the store pin. Reports an
+    unpinned tracked repo (the fail-closed condition) and, when ``resolve`` is set, a ref
+    that does not exist in the repo (``git ls-remote``). ``resolve=False`` skips the network
+    check — used at bake creation, where the worker re-resolves authoritatively.
+    """
+    errors: list[ValidationErrorOut] = []
+    for repo in recipe.tracked_repos():
+        ref = (overrides or {}).get(repo)
+        if not ref:
+            pin = get_pin(repo)
+            ref = pin.ref if pin else None
+        field = f"releases.{repo}"
+        if not ref:
+            errors.append(ValidationErrorOut(
+                message=f"no release pinned for '{repo}' — pin it on the Releases page "
+                        f"or override it for this bake",
+                field=field,
+            ))
+            continue
+        if not resolve:
+            continue
+        try:
+            sha = resolve_ref(repo, ref)
+        except ReleaseError as exc:
+            errors.append(ValidationErrorOut(
+                message=f"could not verify release for '{repo}': {exc}", field=field))
+            continue
+        if not sha:
+            errors.append(ValidationErrorOut(
+                message=f"release ref '{ref}' not found in '{repo}'", field=field))
+    return errors
 
 
 def _accepted(record: BakeRecord) -> BakeAccepted:
@@ -146,6 +201,10 @@ def validate_recipe(
         except RecipeError as exc:
             errors.append(_verr(exc))
 
+    # Also check the release(s): a tracked repo must be pinned (or overridden) and the
+    # effective ref must exist — the same fail-closed condition the bake would hit.
+    errors.extend(_release_errors(recipe, body.releases))
+
     return ValidateResult(ok=len(errors) == 0, errors=errors)
 
 
@@ -204,6 +263,13 @@ async def create_bake_for_recipe(
     except RecipeError as exc:
         raise HTTPException(status_code=422, detail=exc.message) from exc
 
+    # Reject a bake whose tracked repo has no pin (or override) up front, rather than
+    # enqueueing one the worker will fail closed. Cheap check only — no network resolution
+    # here; the worker re-resolves the ref authoritatively at bake time.
+    rel_errors = _release_errors(recipe, body.releases, resolve=False)
+    if rel_errors:
+        raise HTTPException(status_code=422, detail=rel_errors[0].message)
+
     # Idempotency: replay the same key → return the existing bake unchanged.
     if body.idempotency_key:
         existing = find_bake_by_idempotency(body.idempotency_key)
@@ -218,6 +284,7 @@ async def create_bake_for_recipe(
         mode=body.mode.value,
         builder=body.builder or settings.default_builder,
         inputs=resolved,
+        releases=body.releases,
         status="queued",
         idempotency_key=body.idempotency_key,
     )

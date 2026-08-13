@@ -54,11 +54,13 @@ def run_phase(
     phase: str,
     inputs: dict,
     emit: Callable[[dict], None],
+    releases: dict | None = None,
 ) -> None:
     """Run one recipe ``phase`` against ``target``, emitting step/line events via ``emit``.
 
     No-ops (returns immediately) when the recipe leaves the phase empty. Raises
-    :class:`RunPhaseError` on the first failed operation.
+    :class:`RunPhaseError` on the first failed operation. ``releases`` (repo → ``{ref, sha}``)
+    is exposed to recipes as ``host.data["chef_releases"]``.
     """
     # A composed recipe contributes several phase callables — each base's own @deploy in
     # stack order, then the recipe's own last. A plain recipe yields a chain of one.
@@ -67,7 +69,7 @@ def run_phase(
         return
     composed = len(chain) > 1
 
-    inventory = _build_inventory(target, inputs)
+    inventory = _build_inventory(target, inputs, releases)
     state = State(inventory, Config(), check_for_changes=False)
 
     # Forward pyinfra's own log lines (connect/op-start/success/retry/error) live, on top
@@ -183,13 +185,16 @@ class _LogForwarder(logging.Handler):
             self.handleError(record)
 
 
-def _build_inventory(target: SshTarget, inputs: dict) -> Inventory:
+def _build_inventory(target: SshTarget, inputs: dict, releases: dict | None = None) -> Inventory:
     """One-host pyinfra inventory for ``target``, with ``inputs`` attached as host data.
 
     ``inputs`` becomes ``host.data`` (recipes call ``host.data.get(...)``); for the ssh
     connector the connection knobs (``ssh_*``) are merged in and win on any key clash.
+    Resolved tracked releases are attached under the reserved key ``chef_releases``
+    (repo → ``{ref, sha}``), kept distinct from user inputs.
     """
     data = dict(inputs or {})
+    data["chef_releases"] = releases or {}
     connector = target.connector
 
     if connector == "local":

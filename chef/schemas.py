@@ -34,11 +34,22 @@ class RecipeSummary(BaseModel):
     )
 
 
+class TrackedReleaseOut(BaseModel):
+    repo: str
+    ref: str | None = Field(default=None, description="The pinned ref, or null if unpinned.")
+    sha: str | None = Field(default=None, description="The commit the ref resolved to.")
+    resolved_at: datetime | None = None
+
+
 class RecipeDetail(RecipeSummary):
     phases: dict[str, str]
     size: SizeOut
     input_schema: dict = Field(default_factory=dict, description="JSON Schema for `inputs`.")
     publish: list[dict] = []
+    tracked: list[TrackedReleaseOut] = Field(
+        default_factory=list,
+        description="Upstream repos this recipe pins ([[track]]) with the current store pin.",
+    )
     source: dict[str, str] = Field(default_factory=dict, description="Recipe source files.")
     lineage: list[str] = Field(
         default_factory=list,
@@ -59,6 +70,10 @@ class ValidationErrorOut(BaseModel):
 class ValidateRequest(BaseModel):
     name: str
     inputs: dict = Field(default_factory=dict)
+    releases: dict[str, str] = Field(
+        default_factory=dict,
+        description="Per-bake release overrides to check, {repo: ref}. Empty uses store pins.",
+    )
 
 
 class ValidateResult(BaseModel):
@@ -83,6 +98,10 @@ class BakeCreate(BaseModel):
     inputs: dict = Field(default_factory=dict)
     mode: Mode = Mode.cold
     builder: str | None = Field(default=None, description="Override the default builder.")
+    releases: dict[str, str] = Field(
+        default_factory=dict,
+        description="One-off release overrides, {repo: ref}. Empty uses the store pin.",
+    )
     idempotency_key: str | None = None
 
     model_config = {
@@ -169,6 +188,25 @@ class PropagateResult(BaseModel):
     source: str = Field(default="", description="The host that holds the image and serves it.")
     servers: list[str] = Field(default_factory=list, description="Hosts the fan-out targets.")
     detail: str = ""
+
+
+# --- releases ----------------------------------------------------------------
+
+
+class SetPinRequest(BaseModel):
+    repo: str = Field(..., description='Repo identifier, e.g. "frappe/pilot".')
+    ref: str = Field(..., description="Git ref to pin: a tag, branch, or commit SHA.")
+
+    model_config = {
+        "json_schema_extra": {
+            "examples": [{"repo": "frappe/pilot", "ref": "v0.0.23-pre-alpha"}]
+        }
+    }
+
+
+class RefsOut(BaseModel):
+    repo: str
+    refs: list[str] = Field(default_factory=list, description="Available tags, newest first.")
 
 
 # --- errors ------------------------------------------------------------------

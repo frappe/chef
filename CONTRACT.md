@@ -57,6 +57,27 @@ set_bake(status=succeeded, exit_code=0);  emit done(0)
 `store.record_step(...)`. On `Job.abort()` (arq), catch `asyncio.CancelledError`, set
 `aborted`, release the builder, re-raise.
 
+## Release tracking (chef/releases.py + chef/store.py)
+
+- **Store** (`chef/store.py`): `TrackedRelease(repo pk, ref, sha, resolved_at, updated_at)`
+  with `get_pin(repo)`, `set_pin(repo, ref, sha)`, `list_pins()`, `delete_pin(repo)`.
+  `BakeRecord.releases: dict` = per-bake `{repo: ref}` overrides (one bake, store
+  untouched).
+- **Resolver** (`chef/releases.py`): `resolve_ref(repo, ref) -> sha|None`,
+  `list_refs(repo) -> [tags]` (newest-first), `ReleaseError`; backed by `git ls-remote`
+  (no GitHub API/token).
+- **Manifest**: `[[track]] repo = "…"` is identity only -> `Manifest.track: list[dict]`,
+  unioned in `_merge` (dedup by repo); `Recipe.tracked_repos() -> [repo]`.
+- **Pipeline** (`worker/bake_job.py`): before acquire, resolve every tracked repo's
+  effective ref (per-bake override else store pin); fail **closed** if any is unpinned;
+  resolve ref -> sha; inject `host.data["chef_releases"] = {repo: {ref, sha}}` via
+  `run_phase(..., releases=...)`; record `provenance["releases"] = {repo: {ref, sha}}` on
+  each image.
+- **API** (`app/routers/releases.py`, mounted at `/releases`): `GET /releases/` (list),
+  `PUT /releases/ {repo, ref}` (validate + resolve; 422 if ref not found),
+  `DELETE /releases/{repo:path}`, `GET /releases/refs?repo=` (tag picker). Plus
+  `RecipeDetail.tracked`, `BakeCreate.releases`, `ImageOut.provenance.releases`.
+
 ## Streaming (events.py + app/sse.py)
 
 Wire shapes (JSON): `line{line}`, `overwrite{line}`, `step{name,index,total,state,retries}`,
@@ -70,10 +91,11 @@ JSON of the dict (matches the lifted `useTaskStream.js`).
 
 ```python
 def run_phase(target: SshTarget, recipe: Recipe, phase: str, inputs: dict,
-              emit: Callable[[dict], None]) -> None: ...
+              emit: Callable[[dict], None], releases: dict | None = None) -> None: ...
 ```
 - Build a pyinfra inventory from `target` (connector `ssh` with `ssh_config_file`/`key_file`,
-  or `docker`/`local`), setting **host data = `inputs`** so recipes read `host.data.get(...)`.
+  or `docker`/`local`), setting **host data = `inputs` plus `chef_releases`** (repo ->
+  `{ref, sha}`; `releases or {}` when absent) so recipes read `host.data.get(...)`.
 - Import the phase callable via `recipe.load_phase(phase)`; it queues ops.
 - **Primary path:** run **one op at a time** — for each queued op, `add_op` → `run_ops` →
   read `OperationMeta` (name, `did_change`, retries, output) → `emit(step_event(...))` and
@@ -161,7 +183,8 @@ cycles and missing bases raise `RecipeError`. When `compose` is set, `base_image
 `[phases].build` are optional (inherited). The **merge algebra** (`_merge`): `base_image` =
 own-explicit-or-bases-agree; `size` = per-field max (an undeclared derived size doesn't
 count); `modes` = own-declared-or-intersection-of-bases; `tags` = union +`composed`; `inputs`
-= union, later-in-stack wins (override a default / share an input); `publish` = own only.
+= union, later-in-stack wins (override a default / share an input); `track` = union, dedup by
+repo (like inputs); `publish` = own only.
 Each phase runs **every stack member's own `@deploy` in order** — `Recipe.phase_chain(phase)`
 returns `[(name, callable)]`; `run_phase` `add_deploy`s each; `has_phase` is stack-aware.
 Because pyinfra ops resolve assets relative to each `recipe.py`'s `__file__`, a base's

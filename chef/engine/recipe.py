@@ -57,6 +57,7 @@ class Manifest:
     size: BuildSize
     inputs: dict[str, dict]         # raw [inputs.*] tables
     publish: list[dict]             # [[publish]] blocks
+    track: list[dict] = field(default_factory=list)    # [[track]] repo-identity blocks
     path: Path = field(default=Path("."))
     compose: list[str] = field(default_factory=list)   # base recipes this one stacks, in order
     modes_declared: bool = False    # did the .toml set `modes` (vs. the ["cold"] default)?
@@ -117,6 +118,18 @@ class Recipe:
             field = ".".join(str(p) for p in exc.absolute_path) or None
             raise RecipeError(exc.message, field=field) from exc
         return resolved
+
+    # --- tracked releases -----------------------------------------------------
+
+    def tracked_repos(self) -> list[str]:
+        """The upstream repos this recipe (and everything it composes) tracks, deduped in
+        stack order. Each needs a pin in the release-tracking store to bake."""
+        repos: list[str] = []
+        for entry in self.manifest.track:
+            repo = entry.get("repo", "")
+            if repo and repo not in repos:
+                repos.append(repo)
+        return repos
 
     # --- phases ---------------------------------------------------------------
 
@@ -225,6 +238,13 @@ def _parse_manifest(path: Path) -> Manifest:
     if not compose and not phases.get("build"):
         raise RecipeError("recipe.toml [phases] must define 'build'", field="phases.build")
 
+    # [[track]] declares the upstream repos this recipe installs; the release-tracking store
+    # owns the pinned ref per repo. Identity only here — no pin value lives in the manifest.
+    track = [dict(t) for t in data.get("track", [])]
+    for t in track:
+        if not t.get("repo"):
+            raise RecipeError("recipe.toml [[track]] entry missing 'repo'", field="track")
+
     return Manifest(
         name=data["name"],
         version=str(data["version"]),
@@ -240,6 +260,7 @@ def _parse_manifest(path: Path) -> Manifest:
         size=size,
         inputs=dict(data.get("inputs", {})),
         publish=list(data.get("publish", [])),
+        track=track,
         path=path,
         compose=compose,
         modes_declared="modes" in data,
@@ -259,7 +280,9 @@ def _merge(stack: list[Recipe], own: Manifest) -> Manifest:
       * ``inputs``     — **union**; later-in-stack wins a name clash (``own`` is last, so it
         overrides a base default; two bases may also intentionally share one input);
       * ``publish``    — the derived recipe's **own** targets (they name the output artifact);
-      * ``phases``     — the derived recipe's own phases (the base phases run via the stack).
+      * ``phases``     — the derived recipe's own phases (the base phases run via the stack);
+      * ``track``      — **union** across the stack (dedup by repo), so composing ``pilot``
+        makes a golden track ``frappe/pilot`` too.
     """
     manifests = [leaf.manifest for leaf in stack]
 
@@ -310,6 +333,15 @@ def _merge(stack: list[Recipe], own: Manifest) -> Manifest:
     for m in manifests:
         inputs.update(m.inputs)
 
+    track: list[dict] = []
+    seen_repos: set[str] = set()
+    for m in manifests:
+        for t in m.track:
+            repo = t.get("repo", "")
+            if repo and repo not in seen_repos:
+                seen_repos.add(repo)
+                track.append(dict(t))
+
     return Manifest(
         name=own.name,
         version=own.version,
@@ -321,6 +353,7 @@ def _merge(stack: list[Recipe], own: Manifest) -> Manifest:
         size=size,
         inputs=inputs,
         publish=list(own.publish),
+        track=track,
         path=own.path,
         compose=list(own.compose),
         modes_declared=own.modes_declared,
@@ -404,6 +437,10 @@ build_memory_megabytes = 0             # boot fat for a heavy build, resize down
 # type = "string"
 # default = "value"
 # description = "what it controls"
+
+# [[track]]                             # an upstream repo whose release this image pins;
+# repo = "frappe/pilot"                 # the pinned ref lives in the release-tracking store,
+#                                       # set via `chef releases set` / the Releases page.
 
 [[publish]]                            # where produced images go; 0..n, Publisher-typed
 type = "local"

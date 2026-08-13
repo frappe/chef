@@ -30,12 +30,39 @@ from chef import store
 from chef.builders import get_builder
 from chef.config import get_settings
 from chef.engine.pyinfra_runner import run_phase
-from chef.engine.recipe import load_recipe
+from chef.engine.recipe import Recipe, load_recipe
 from chef.events import done_event, line_event, status_event
 from chef.publishers import get_publisher
+from chef.releases import resolve_ref
 from chef.types import BakeState, Mode, SnapshotKind, SnapshotRef
 
 Emit = Callable[[dict], None]
+
+
+def _resolve_releases(recipe: Recipe, bake: store.BakeRecord) -> dict[str, dict]:
+    """Resolve every repo the recipe tracks to its pinned ``{ref, sha}``.
+
+    The effective ref is the per-bake override (``bake.releases``) if given, else the store
+    pin. **Fail-closed**: an unpinned tracked repo (or an unresolvable ref) raises, so the
+    bake stops before a VM is acquired rather than baking a surprise version.
+    """
+    out: dict[str, dict] = {}
+    overrides = bake.releases or {}
+    for repo in recipe.tracked_repos():
+        ref = overrides.get(repo)
+        if not ref:
+            pin = store.get_pin(repo)
+            ref = pin.ref if pin else None
+        if not ref:
+            raise ValueError(
+                f"recipe '{bake.recipe}' tracks '{repo}' but no release is pinned — "
+                f"set one with `chef releases set {repo} <ref>` or PUT /releases"
+            )
+        sha = resolve_ref(repo, ref)
+        if not sha:
+            raise ValueError(f"release ref '{ref}' not found in '{repo}'")
+        out[repo] = {"ref": ref, "sha": sha}
+    return out
 
 
 # --- the shared, synchronous pipeline ----------------------------------------
@@ -83,6 +110,11 @@ def run_pipeline(bake_id: str, emit: Emit) -> int:
 
     target = None
     try:
+        # --- resolve tracked releases (fail-closed, before acquiring a VM) ----
+        releases = _resolve_releases(recipe, bake)
+        for repo, pin in releases.items():
+            emit(line_event(f"release {repo} @ {pin['ref']} ({pin['sha'][:12]})"))
+
         # --- acquire ---------------------------------------------------------
         _set(BakeState.acquiring)
         title = f"{recipe.manifest.name}-{version}"
@@ -91,12 +123,12 @@ def run_pipeline(bake_id: str, emit: Emit) -> int:
 
         # --- build -----------------------------------------------------------
         _set(BakeState.building, phase="build")
-        run_phase(target, recipe, "build", inputs, _phase_emit("build"))
+        run_phase(target, recipe, "build", inputs, _phase_emit("build"), releases=releases)
 
         # --- verify (fail-loud gate before any snapshot) ---------------------
         if recipe.has_phase("verify"):
             _set(BakeState.verifying, phase="verify")
-            run_phase(target, recipe, "verify", inputs, _phase_emit("verify"))
+            run_phase(target, recipe, "verify", inputs, _phase_emit("verify"), releases=releases)
 
         # --- snapshot (cold before warm, decision #7) ------------------------
         _set(BakeState.snapshotting)
@@ -110,7 +142,8 @@ def run_pipeline(bake_id: str, emit: Emit) -> int:
             elif kind is SnapshotKind.warm:
                 builder.start(target)
                 if recipe.has_phase("warm_arm"):
-                    run_phase(target, recipe, "warm_arm", inputs, _phase_emit("warm_arm"))
+                    run_phase(target, recipe, "warm_arm", inputs, _phase_emit("warm_arm"),
+                              releases=releases)
                 snapshots[kind] = builder.snapshot(
                     target, SnapshotKind.warm, title=f"{title}-warm"
                 )
@@ -138,7 +171,8 @@ def run_pipeline(bake_id: str, emit: Emit) -> int:
                         version=version,
                         kind=kind.value,
                         base_image=recipe.manifest.base_image,
-                        provenance={"builder": builder.name, "inputs": inputs},
+                        provenance={"builder": builder.name, "inputs": inputs,
+                                    "releases": releases},
                         location_type=loc.type,
                         location_uri=loc.uri,
                         manifest=loc.manifest,
