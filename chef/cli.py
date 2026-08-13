@@ -6,6 +6,7 @@ Commands:
   * ``bake``            run a recipe inline (no redis) and print streamed events.
   * ``new``             scaffold a recipe directory from the template.
   * ``install-service`` run the ``chef`` recipe against ``@local`` to install chef here.
+  * ``releases``        manage per-repo release pins (``list`` / ``set`` / ``refs``).
 
 Heavy / optional modules (uvicorn, arq, the worker package) are imported lazily inside
 each command so ``import chef.cli`` always succeeds even before the worker lands.
@@ -35,6 +36,16 @@ def _parse_inputs(pairs: Optional[list[str]]) -> dict[str, str]:
             raise typer.BadParameter(f"expected key=value, got {pair!r}", param_hint="--input")
         key, _, value = pair.partition("=")
         out[key.strip()] = value
+    return out
+
+
+def _parse_releases(pairs: Optional[list[str]]) -> dict[str, str]:
+    out: dict[str, str] = {}
+    for pair in pairs or []:
+        if "=" not in pair:
+            raise typer.BadParameter(f"expected repo=ref, got {pair!r}", param_hint="--release")
+        repo, _, ref = pair.partition("=")
+        out[repo.strip()] = ref.strip()
     return out
 
 
@@ -93,6 +104,11 @@ def bake(
     ),
     mode: str = typer.Option("cold", help="cold | warm | both."),
     builder: Optional[str] = typer.Option(None, help="Override the default builder."),
+    release: Optional[list[str]] = typer.Option(
+        None, "--release", "-r",
+        help="Pin a tracked repo for this bake only, as repo=ref (repeatable). "
+        "Overrides the store pin; recorded in the image's provenance.",
+    ),
     background: bool = typer.Option(
         False,
         "--async/--inline",
@@ -136,6 +152,7 @@ def bake(
             mode=mode,
             builder=chosen_builder,
             inputs=resolved,
+            releases=_parse_releases(release),
             status="queued",
         )
     )
@@ -275,6 +292,63 @@ def install_service(
         raise typer.Exit(1) from exc
 
     typer.secho("chef installed — chef-api + chef-worker enabled", fg="green")
+
+
+releases_app = typer.Typer(no_args_is_help=True, help="Manage per-repo release pins.")
+app.add_typer(releases_app, name="releases")
+
+
+@releases_app.command("list")
+def releases_list() -> None:
+    """List every repo's release pin."""
+    from chef.store import init_db, list_pins
+
+    init_db()
+    pins = list_pins()
+    if not pins:
+        typer.echo("(no release pins set)")
+        return
+    for p in pins:
+        typer.echo(f"{p.repo}\t{p.ref}\t{p.sha[:12]}")
+
+
+@releases_app.command("set")
+def releases_set(
+    repo: str = typer.Argument(..., help='Repo, e.g. "frappe/pilot".'),
+    ref: str = typer.Argument(..., help="Git ref: a tag, branch, or commit SHA."),
+) -> None:
+    """Pin REPO to REF (validated + resolved to a SHA via git ls-remote)."""
+    from chef.releases import ReleaseError, resolve_ref
+    from chef.store import init_db, set_pin
+
+    try:
+        sha = resolve_ref(repo, ref)
+    except ReleaseError as exc:
+        typer.secho(f"resolve failed: {exc}", fg="red", err=True)
+        raise typer.Exit(1) from exc
+    if not sha:
+        typer.secho(f"ref {ref!r} not found in {repo!r}", fg="red", err=True)
+        raise typer.Exit(2)
+    init_db()
+    set_pin(repo, ref, sha)
+    typer.secho(f"pinned {repo} @ {ref} ({sha[:12]})", fg="green")
+
+
+@releases_app.command("refs")
+def releases_refs(
+    repo: str = typer.Argument(..., help='Repo, e.g. "frappe/pilot".'),
+    limit: int = typer.Option(20, help="Max tags to show."),
+) -> None:
+    """List a repo's tags, newest first (git ls-remote --tags)."""
+    from chef.releases import ReleaseError, list_refs
+
+    try:
+        refs = list_refs(repo)
+    except ReleaseError as exc:
+        typer.secho(f"ls-remote failed: {exc}", fg="red", err=True)
+        raise typer.Exit(1) from exc
+    for r in refs[:limit]:
+        typer.echo(r)
 
 
 def main() -> None:
