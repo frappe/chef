@@ -1,0 +1,17 @@
+[Unit]
+Description=Datum API
+# A user unit cannot order against clickhouse-server.service, which is a system unit.
+# Restart=always is what covers ClickHouse not being up yet.
+
+[Service]
+Type=simple
+WorkingDirectory={{ base_dir }}
+EnvironmentFile={{ env_file }}
+ExecStart={{ base_dir }}/.venv/bin/uvicorn datum.api.app:create_app --factory --host 127.0.0.1 --port {{ listen_port }} --workers {{ workers }}
+StandardOutput=append:{{ log_dir }}/access.log
+StandardError=append:{{ log_dir }}/error.log
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target
