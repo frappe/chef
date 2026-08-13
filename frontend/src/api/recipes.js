@@ -6,8 +6,8 @@ export const recipesApi = {
   // GET /recipes/{name} -> RecipeDetail
   get: (name) => unwrap(request.get(`recipes/${encodeURIComponent(name)}`)),
   // POST /recipes/validate -> { ok, errors[] }
-  validate: (name, inputs = {}) =>
-    unwrap(request.post('recipes/validate', { json: { name, inputs } })),
+  validate: (name, inputs = {}, releases = {}) =>
+    unwrap(request.post('recipes/validate', { json: { name, inputs, releases } })),
   // POST /recipes/{name}/bake -> 202 { bake_id, status, links }
   bake: (name, payload) =>
     unwrap(request.post(`recipes/${encodeURIComponent(name)}/bake`, { json: payload })),

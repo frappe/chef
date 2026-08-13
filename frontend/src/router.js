@@ -20,6 +20,12 @@ const routes = [
     meta: { title: 'Images' },
   },
   {
+    path: '/releases',
+    name: 'Releases',
+    component: () => import('./pages/Releases.vue'),
+    meta: { title: 'Releases' },
+  },
+  {
     path: '/bakes/:id',
     name: 'BakeDetail',
     component: () => import('./pages/BakeDetail.vue'),
