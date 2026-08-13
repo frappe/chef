@@ -21,7 +21,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from chef import __version__, store
 from chef.app.auth import require_token
-from chef.app.routers import bakes, images, recipes
+from chef.app.routers import bakes, images, recipes, releases
 from chef.config import get_settings
 from chef.schemas import ErrorOut
 
@@ -45,6 +45,7 @@ _TAGS_METADATA = [
     {"name": "recipes", "description": "Browse, validate and bake recipes."},
     {"name": "bakes", "description": "Track, stream and abort bakes."},
     {"name": "images", "description": "Produced images and installation."},
+    {"name": "releases", "description": "Per-repo release pins for tracked recipes."},
     {"name": "meta", "description": "Health and machine-readable API tour."},
 ]
 
@@ -109,6 +110,10 @@ def create_app() -> FastAPI:
     )
     app.include_router(
         images.router, prefix="/images", tags=["images"],
+        dependencies=protected, responses=unauthorized,
+    )
+    app.include_router(
+        releases.router, prefix="/releases", tags=["releases"],
         dependencies=protected, responses=unauthorized,
     )
 
