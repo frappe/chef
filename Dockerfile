@@ -5,9 +5,10 @@ ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
-# curl is handy for container healthchecks / debugging; uv does the install.
+# curl is handy for container healthchecks / debugging; git backs release resolution
+# (chef.releases uses `git ls-remote`); uv does the install.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends curl \
+    && apt-get install -y --no-install-recommends curl git \
     && rm -rf /var/lib/apt/lists/* \
     && pip install --no-cache-dir uv
 
