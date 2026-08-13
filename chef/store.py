@@ -33,6 +33,8 @@ class BakeRecord(SQLModel, table=True):
     mode: str = "cold"
     builder: str = "docker"
     inputs: dict = Field(default_factory=dict, sa_column=Column(SAJSON))
+    # Per-bake release overrides: {repo: ref}. Empty = use the TrackedRelease store pin.
+    releases: dict = Field(default_factory=dict, sa_column=Column(SAJSON))
     status: str = "queued"
     exit_code: int | None = None
     error: str | None = None
@@ -71,6 +73,20 @@ class ImageRecord(SQLModel, table=True):
     size_bytes: int = 0
     host_signature: dict | None = Field(default=None, sa_column=Column(SAJSON))
     created_at: datetime = Field(default_factory=_now)
+
+
+class TrackedRelease(SQLModel, table=True):
+    """A per-repo release pin. The recipe declares which repos it tracks (``[[track]]``);
+    this store owns the pinned ref and the commit it resolved to, managed at runtime via
+    the API/UI. One row per repo, shared by every recipe that installs it."""
+
+    __tablename__ = "tracked_releases"
+
+    repo: str = Field(primary_key=True)          # e.g. "frappe/pilot"
+    ref: str = ""                                 # the pinned git ref (tag / branch / sha)
+    sha: str = ""                                 # the commit ``ref`` resolved to when pinned
+    resolved_at: datetime = Field(default_factory=_now)
+    updated_at: datetime = Field(default_factory=_now)
 
 
 _engine: Engine | None = None
@@ -176,3 +192,42 @@ def list_images(limit: int = 200) -> list[ImageRecord]:
 def images_for_bake(bake_id: str) -> list[ImageRecord]:
     with Session(get_engine()) as s:
         return list(s.exec(select(ImageRecord).where(ImageRecord.bake_id == bake_id)))
+
+
+# --- tracked releases --------------------------------------------------------
+
+def get_pin(repo: str) -> TrackedRelease | None:
+    with Session(get_engine()) as s:
+        return s.get(TrackedRelease, repo)
+
+
+def list_pins() -> list[TrackedRelease]:
+    with Session(get_engine()) as s:
+        return list(s.exec(select(TrackedRelease).order_by(TrackedRelease.repo)))
+
+
+def set_pin(repo: str, ref: str, sha: str) -> TrackedRelease:
+    """Create or update the pin for ``repo``. ``sha`` is the ref's resolved commit."""
+    with Session(get_engine()) as s:
+        pin = s.get(TrackedRelease, repo)
+        if pin is None:
+            pin = TrackedRelease(repo=repo, ref=ref, sha=sha)
+        else:
+            pin.ref = ref
+            pin.sha = sha
+            pin.resolved_at = _now()
+            pin.updated_at = _now()
+        s.add(pin)
+        s.commit()
+        s.refresh(pin)
+        return pin
+
+
+def delete_pin(repo: str) -> bool:
+    with Session(get_engine()) as s:
+        pin = s.get(TrackedRelease, repo)
+        if pin is None:
+            return False
+        s.delete(pin)
+        s.commit()
+        return True
