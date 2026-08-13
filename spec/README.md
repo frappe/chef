@@ -19,8 +19,8 @@ one-command install).
 - **Bake** — one run: a durable arq job (`chef/worker/bake_job.py`) that drives a recipe
   through the pipeline and emits streamed, per-step results. `bake_id` = uuid4.
 - **Image** — a produced artifact: cold or warm, with provenance
-  (recipe+version+inputs+SHAs), a host signature (warm only), and where its bytes live.
-  `image_id` = uuid4. Indexed in SQLite (`chef/store.py`).
+  (recipe+version+inputs+tracked releases+SHAs), a host signature (warm only), and where
+  its bytes live. `image_id` = uuid4. Indexed in SQLite (`chef/store.py`).
 - **Builder** *(pluggable, `chef/builders/base.py`)* — supplies a blank VM and performs the
   host-side snapshot: `acquire → snapshot → release` (+ `stop`/`start`/`host_signature`).
   `AtlasBuilder` is the production default; `DockerBuilder`/`LocalBuilder` need no fleet.
@@ -61,6 +61,15 @@ Atlas/boat are simply the default Builder + Publisher — never baked into chef'
     own-only — and each phase runs every stacked recipe's `@deploy` in order. A pure
     composition needs no `recipe.py`. Composition is filesystem + engine only; the bake
     pipeline is unchanged. See `CONTRACT.md`.
+13. **Release tracking (separate store).** A recipe declares the upstream repos it
+    installs with `[[track]] repo = "…"` (identity only). A per-repo pin — a git ref + the
+    commit it resolved to — lives in a runtime, API/UI-managed store (`TrackedRelease`,
+    `chef/store.py`), not in `recipe.toml`. Composition unions `[[track]]` (a golden
+    composing `pilot` tracks `frappe/pilot` too). Refs resolve/validate via `git ls-remote`
+    (`chef/releases.py`, no GitHub API). A bake **fails closed** when a tracked repo has no
+    pin; the resolved `{ref, sha}` is injected as `host.data["chef_releases"]` and
+    recorded in each image's provenance. A per-bake `releases` override pins for a single
+    bake without touching the store.
 
 ## Architecture
 
