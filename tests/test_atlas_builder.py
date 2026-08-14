@@ -319,7 +319,12 @@ def test_publisher_publish_returns_atlas_base_image_location():
     assert loc.type == "atlas-base-image"
     assert loc.uri == "nginx"  # uri == the config name
     # distributed_to is None: no `distribute` in the block, so no fleet fan-out.
-    assert loc.manifest == {"image_name": "nginx", "snapshot": "snap-cold-1", "distributed_to": None}
+    assert loc.manifest == {
+        "image_name": "nginx",
+        "snapshot": "snap-cold-1",
+        "distributed_to": None,
+        "registered_user_image": False,
+    }
     assert ("promote_image", "snap-cold-1", "nginx", None) in client.calls
     assert ("get_image", "nginx") in client.calls
 

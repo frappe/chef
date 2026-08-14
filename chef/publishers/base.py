@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 
-from chef.types import ImageLocation, SnapshotRef
+from chef.types import ImageLocation, SnapshotKind, SnapshotRef
 
 
 class Publisher(ABC):
@@ -24,6 +24,13 @@ class Publisher(ABC):
     #: the publishers compatible with the active builder (e.g. LocalPublisher uploads a
     #: local tar and can't consume an Atlas snapshot reference), skipping the rest.
     builders: tuple[str, ...] | None = None
+
+    #: snapshot kinds this publisher can consume, or ``None`` for any. A ``both`` bake takes
+    #: a cold *and* a warm snapshot and runs every publish block against each; a publisher
+    #: that only makes sense for one kind (e.g. ``atlas-base-image`` promotes a base image,
+    #: which a warm memory snapshot can't be) declares it here so the pipeline skips the
+    #: mismatched pairing instead of failing the bake.
+    kinds: tuple[SnapshotKind, ...] | None = None
 
     @abstractmethod
     def publish(

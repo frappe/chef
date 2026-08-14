@@ -233,3 +233,16 @@ class AtlasClient:
 
     def get_server(self, name: str) -> dict:
         return self.call("get_server", name=name)
+
+    def register_bench_snapshot(self, snapshot: str) -> str:
+        """Wire a snapshot in as Atlas's ``default_bench_snapshot`` — the golden a self-serve
+        Site clones from. The signup counterpart to :meth:`register_user_image`: a Site's VM
+        is cloned from a snapshot (not laid down from a base image), so promoting a base image
+        is not enough to feed signups. Atlas rejects a non-Available snapshot."""
+        return self.call("register_bench_snapshot", snapshot=snapshot)
+
+    def register_user_image(self, image: str) -> str:
+        """Wire a base image in as Atlas's ``default_user_image`` — the image a server
+        (``create_vm``) boots when no per-version image matches. Call it after ``promote_image``
+        (+ ``distribute_image``). Atlas rejects an inactive image."""
+        return self.call("register_user_image", image=image)

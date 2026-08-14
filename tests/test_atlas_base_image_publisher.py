@@ -15,6 +15,7 @@ class FakeClient:
     def __init__(self):
         self.promote_call = None
         self.distribute_call = None
+        self.register_user_image_call = None
         self.get_image_calls = 0
 
     def promote_image(self, *, snapshot, image_name, title=None):
@@ -24,6 +25,10 @@ class FakeClient:
     def distribute_image(self, image, servers=None):
         self.distribute_call = {"image": image, "servers": servers}
         return {"image": image, "source": "host-1", "servers": ["host-2", "host-3"]}
+
+    def register_user_image(self, image):
+        self.register_user_image_call = image
+        return image
 
     def get_image(self, name):
         self.get_image_calls += 1
@@ -75,3 +80,28 @@ def test_atlas_publisher_distribute_passes_explicit_servers():
     )
 
     assert client.distribute_call == {"image": "pilot-chef", "servers": ["host-2"]}
+
+
+def test_atlas_publisher_registers_user_image_when_configured():
+    client = FakeClient()
+    pub = AtlasPublisher(client=client, active_timeout=5, poll_interval=0)
+
+    loc = pub.publish(
+        _snap(),
+        recipe="pilot",
+        version="0.1.0",
+        config={"name": "pilot-chef", "register_user_image": True},
+    )
+
+    assert client.register_user_image_call == "pilot-chef"
+    assert loc.manifest["registered_user_image"] is True
+
+
+def test_atlas_publisher_does_not_register_user_image_by_default():
+    client = FakeClient()
+    pub = AtlasPublisher(client=client, active_timeout=5, poll_interval=0)
+
+    loc = pub.publish(_snap(), recipe="pilot", version="0.1.0", config={"name": "pilot-chef"})
+
+    assert client.register_user_image_call is None
+    assert loc.manifest["registered_user_image"] is False

@@ -21,7 +21,7 @@ import time
 from chef.atlas_client import AtlasClient
 from chef.publishers import PublisherError
 from chef.publishers.base import Publisher
-from chef.types import ImageLocation, SnapshotRef
+from chef.types import ImageLocation, SnapshotKind, SnapshotRef
 
 #: how long to wait for a promoted image to report ``is_active``.
 _ACTIVE_TIMEOUT = 600
@@ -31,6 +31,7 @@ _POLL_INTERVAL = 5
 class AtlasPublisher(Publisher):
     type = "atlas-base-image"
     builders = ("atlas",)  # promotes an Atlas-side snapshot reference
+    kinds = (SnapshotKind.cold,)  # a base image is a cold root template; a warm snapshot can't promote
 
     def __init__(
         self,
@@ -70,6 +71,14 @@ class AtlasPublisher(Publisher):
             handle = self.client.distribute_image(image_name, servers=config.get("servers"))
             distributed_to = handle.get("servers")
 
+        # Opt-in server default (``register_user_image = true``): name this freshly-promoted
+        # (and now fleet-wide) image as ``Atlas Settings.default_user_image`` so a server
+        # (``create_vm``) boots it without an operator hand-wiring the Single.
+        registered_user_image = False
+        if config.get("register_user_image"):
+            self.client.register_user_image(image_name)
+            registered_user_image = True
+
         return ImageLocation(
             type="atlas-base-image",
             uri=image_name,
@@ -77,6 +86,7 @@ class AtlasPublisher(Publisher):
                 "image_name": image_name,
                 "snapshot": snapshot.ref,
                 "distributed_to": distributed_to,
+                "registered_user_image": registered_user_image,
             },
         )
 
@@ -92,6 +102,44 @@ class AtlasPublisher(Publisher):
                     f"{self.active_timeout:g}s"
                 )
             time.sleep(self.poll_interval)
+
+
+class AtlasBenchGoldenPublisher(Publisher):
+    """Register a cold snapshot as Atlas's ``default_bench_snapshot`` — the golden a
+    self-serve **Site** clones from.
+
+    The signup sink, next to :class:`AtlasPublisher`'s server sink. A Site's backing VM is
+    not laid down from a base image; it is CLONED from a ``Virtual Machine Snapshot``, so
+    promoting a base image (``atlas-base-image``) does not feed signups. This block hands the
+    same cold snapshot the base image was promoted from to Atlas's ``register_bench_snapshot``,
+    which points ``default_bench_snapshot`` at it.
+
+    Cold only: this registers the durable cold fallback pointer (and anchors the golden host).
+    A warm accelerator, if the ``both`` bake also captured one, needs no publish block — Atlas
+    discovers the newest Available warm snapshot on that host per-server at clone time
+    (``placement.warm_bench_snapshot_for_server``)."""
+
+    type = "atlas-bench-snapshot"
+    builders = ("atlas",)  # consumes an Atlas-side snapshot reference
+    kinds = (SnapshotKind.cold,)  # the cold fallback pointer; warm is auto-discovered, not registered
+
+    def __init__(self, client: AtlasClient | None = None):
+        self.client = client or AtlasClient.from_settings()
+
+    def publish(
+        self,
+        snapshot: SnapshotRef,
+        *,
+        recipe: str,  # noqa: ARG002 - the pointer is the snapshot itself, not a recipe-named target
+        version: str,  # noqa: ARG002
+        config: dict,  # noqa: ARG002 - no target name: default_bench_snapshot is a single Atlas Setting
+    ) -> ImageLocation:
+        self.client.register_bench_snapshot(snapshot.ref)
+        return ImageLocation(
+            type="atlas-bench-snapshot",
+            uri=snapshot.ref,
+            manifest={"default_bench_snapshot": snapshot.ref},
+        )
 
 
 #: S3 uploads move ~20 GB over the host's curl+zstd transport, so allow longer.

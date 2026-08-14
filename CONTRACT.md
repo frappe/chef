@@ -130,7 +130,12 @@ Implement `Publisher` (base.py). `chef/publishers/__init__.py`: `get_publisher(t
 - **S3Publisher** (`type="s3"`, M1): upload to the configured S3/MinIO bucket; return
   `ImageLocation(type="s3", uri="s3://bucket/key", manifest={...})`.
 - **AtlasPublisher** (`type="atlas-base-image"`, M2): `service.promote_image` (+ optional
-  `service.upload_image_to_s3`); `uri` = the base-image name from `config["name"]`.
+  `distribute = true` → `service.distribute_image`, + optional `register_user_image = true` →
+  `service.register_user_image`, wiring it as Atlas `default_user_image` for servers). `kinds =
+  (cold,)` — a warm memory snapshot can't be promoted. `uri` = the base-image name from `config["name"]`.
+- **AtlasBenchGoldenPublisher** (`type="atlas-bench-snapshot"`): `service.register_bench_snapshot`
+  — wire the cold snapshot as Atlas `default_bench_snapshot`, the golden a self-serve Site clones.
+  `kinds = (cold,)`; a `both` bake's warm snapshot is auto-discovered per-host by Atlas, not registered.
 
 ## Atlas API (M2; called ONLY by AtlasBuilder/AtlasPublisher via a small httpx client)
 
@@ -139,7 +144,8 @@ header `Authorization: token <key>:<secret>`, response unwrapped from `{"message
 - `create_bare_vm(title, base_image, vcpus, memory_megabytes, disk_gigabytes, cpu_max_cores?, server?)`
   → `{name,status,ipv6_address,server,server_ipv4}`
 - `snapshot_vm(vm, title?, live?)` → snapshot name; `capture_warm_snapshot(vm, title?)` → name
-- `promote_image(snapshot, image_name, title?)` → image name
+- `promote_image(snapshot, image_name, title?)` → image name; `distribute_image(image, servers?)` → fan-out handle
+- `register_bench_snapshot(snapshot)` → `default_bench_snapshot` (signups); `register_user_image(image)` → `default_user_image` (servers)
 - `upload_image_to_s3(snapshot)`; `get_server(name)` → `{…, architecture, kernel_version, firecracker_version, jailer_version}`
 - Poll VM/snapshot status via `get_virtual_machine` / a snapshot getter until Available.
 

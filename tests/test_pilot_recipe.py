@@ -19,12 +19,14 @@ def test_pilot_manifest():
     m = _pilot().manifest
     assert m.name == "pilot"
     assert m.base_image == "ubuntu-24.04"
-    assert m.modes == ["cold"]
+    assert m.modes == ["cold", "warm", "both"]
     # boots fat (yarn asset build) then a clone serves at the restore size
     assert m.size.build_memory_megabytes == 6144
     assert m.size.effective_build_memory_megabytes == 6144
-    assert [p["type"] for p in m.publish] == ["atlas-base-image", "local"]
+    # server golden (base image), signup golden (bench snapshot), then the local dev sink
+    assert [p["type"] for p in m.publish] == ["atlas-base-image", "atlas-bench-snapshot", "local"]
     assert m.publish[0]["name"] == "pilot-chef"
+    assert m.publish[0]["register_user_image"] is True
 
 
 def test_pilot_inputs_and_phases():
@@ -39,4 +41,5 @@ def test_pilot_inputs_and_phases():
     assert resolved["frappe_branch"] == "version-16"
     assert callable(r.load_phase("build"))
     assert callable(r.load_phase("verify"))
-    assert not r.has_phase("warm_arm")
+    # warm_arm primes the site before a warm capture (both/warm bakes)
+    assert callable(r.load_phase("warm_arm"))

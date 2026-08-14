@@ -133,6 +133,7 @@ class _FakeBuilder(Builder):
 class _FakePublisher:
     type = "local"
     builders: tuple = ()
+    kinds: tuple = ()  # falsy → consumes any snapshot kind (like builders)
 
     def publish(self, snapshot, *, recipe, version, config):
         return ImageLocation(type="local", uri=f"file:///img/{recipe}.tar", manifest={})

@@ -28,6 +28,10 @@ def get_publisher(type: str) -> Publisher:  # noqa: A002 - matches the recipe ke
         from chef.publishers.atlas import AtlasPublisher
 
         return AtlasPublisher()
+    if type == "atlas-bench-snapshot":
+        from chef.publishers.atlas import AtlasBenchGoldenPublisher
+
+        return AtlasBenchGoldenPublisher()
     if type == "atlas-s3":
         from chef.publishers.atlas import AtlasS3Publisher
 
@@ -38,5 +42,5 @@ def get_publisher(type: str) -> Publisher:  # noqa: A002 - matches the recipe ke
         return AtlasDistributePublisher()
     raise PublisherError(
         f"unknown publisher type {type!r} "
-        "(known: local, s3, atlas-base-image, atlas-s3, atlas-distribute)"
+        "(known: local, s3, atlas-base-image, atlas-bench-snapshot, atlas-s3, atlas-distribute)"
     )

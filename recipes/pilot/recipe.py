@@ -209,3 +209,29 @@ def verify():
             "&& echo SITE_OK",
         ],
     )
+
+
+@deploy("arm pilot golden for a warm capture")
+def warm_arm():
+    """Prime the running VM right before the WARM snapshot (both/warm bakes only).
+
+    The cold snapshot is taken from the *stopped* build VM; the pipeline then starts it back
+    up for the warm capture. On that fresh start the systemd --user stack (mariadb/redis/
+    gunicorn, up via lingering) needs a moment, so a warm snapshot taken immediately would
+    freeze a half-warm memory image. Block until the site + console actually serve — the
+    same gate as verify but retried — so the frozen memory pair a signup resumes is a warm,
+    request-ready one, not a cold-booting one."""
+    site = host.data.get("site_name", "site.local")
+    admin_domain = host.data.get("admin_domain", "admin.local")
+    server.shell(
+        name="wait for the frappe stack to be request-ready, then prime it",
+        commands=[
+            # the systemd --user stack comes up on the restart via lingering; give it a beat
+            f"for i in $(seq 1 60); do "
+            f"curl -fsS -H 'Host: {site}' http://localhost/api/method/ping 2>/dev/null | grep -q pong "
+            f"&& curl -fsS -H 'Host: {admin_domain}' http://localhost/ 2>/dev/null | grep -qi '<title>Pilot' "
+            f"&& echo WARM_READY && exit 0; sleep 2; done; "
+            f"echo 'pilot stack did not become ready for the warm capture' >&2; exit 1",
+        ],
+        _timeout=180,
+    )
