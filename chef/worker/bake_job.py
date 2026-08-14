@@ -159,6 +159,12 @@ def run_pipeline(bake_id: str, emit: Emit) -> int:
                         f"{'/'.join(publisher.builders)}, active is '{builder.name}'"
                     ))
                     continue
+                if publisher.kinds and kind not in publisher.kinds:
+                    emit(line_event(
+                        f"skip publish '{pub_cfg['type']}' for {kind.value} snapshot — "
+                        f"consumes {'/'.join(k.value for k in publisher.kinds)}"
+                    ))
+                    continue
                 loc = publisher.publish(
                     snap, recipe=recipe.manifest.name, version=version, config=pub_cfg
                 )
