@@ -176,6 +176,12 @@ class AtlasBuilder(Builder):
         return pub_path.read_text().strip()
 
     def _write_ssh_config(self, config_dir: Path, guest_ipv6: str, server_ipv4: str) -> Path:
+        # The ProxyJump host needs the SAME relaxed host-key handling as the guest — give it
+        # its own `jump` block, not a bare `ProxyJump root@ip`. Otherwise the jump connection
+        # falls back to the caller's default known_hosts + StrictHostKeyChecking, so on any
+        # host whose key isn't already trusted (a fresh container — chef-as-a-service), the
+        # jump dies with "Host key verification failed" and every bake hangs in acquire. A
+        # laptop that has SSH'd the host before only works by accident of a warm known_hosts.
         config_path = config_dir / "ssh_config"
         config_path.write_text(
             f"Host {_SSH_HOST}\n"
@@ -185,7 +191,15 @@ class AtlasBuilder(Builder):
             f"  IdentitiesOnly yes\n"
             f"  StrictHostKeyChecking accept-new\n"
             f"  UserKnownHostsFile /dev/null\n"
-            f"  ProxyJump root@{server_ipv4}\n"
+            f"  ProxyJump jump\n"
+            f"\n"
+            f"Host jump\n"
+            f"  HostName {server_ipv4}\n"
+            f"  User root\n"
+            f"  IdentityFile {self.ssh_key_file}\n"
+            f"  IdentitiesOnly yes\n"
+            f"  StrictHostKeyChecking accept-new\n"
+            f"  UserKnownHostsFile /dev/null\n"
         )
         return config_path
 

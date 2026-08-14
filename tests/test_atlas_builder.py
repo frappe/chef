@@ -167,14 +167,18 @@ def test_acquire_writes_valid_ssh_config_and_returns_target(keypair, ssh_ok):
     assert target.extra["server_ipv4"] == "203.0.113.5"
     assert target.extra["guest_ipv6"] == "2001:db8::1234"
 
-    # the ssh config: correct hostname/ipv6 + ProxyJump through the server.
+    # the ssh config: correct hostname/ipv6 + ProxyJump through a `jump` block that carries
+    # the SAME relaxed host-key handling (so the jump host doesn't need a warm known_hosts).
     config_text = Path(target.ssh_config_file).read_text()
     assert "Host chef-target" in config_text
     assert "HostName 2001:db8::1234" in config_text
-    assert "ProxyJump root@203.0.113.5" in config_text
+    assert "ProxyJump jump" in config_text
+    assert "Host jump" in config_text
+    assert "HostName 203.0.113.5" in config_text
     assert f"IdentityFile {keypair}" in config_text
-    assert "StrictHostKeyChecking accept-new" in config_text
-    assert "UserKnownHostsFile /dev/null" in config_text
+    # both blocks relax host-key checking (guest AND jump host)
+    assert config_text.count("StrictHostKeyChecking accept-new") == 2
+    assert config_text.count("UserKnownHostsFile /dev/null") == 2
 
     # pyinfra's @ssh connector reaches the guest via this config's Host alias.
     assert target.host in config_text
