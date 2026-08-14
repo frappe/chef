@@ -141,6 +141,7 @@ def run_pipeline(bake_id: str, emit: Emit) -> int:
                 )
             elif kind is SnapshotKind.warm:
                 builder.start(target)
+                builder.wait_ready(target)  # the restarted guest boots async — wait for ssh
                 if recipe.has_phase("warm_arm"):
                     run_phase(target, recipe, "warm_arm", inputs, _phase_emit("warm_arm"),
                               releases=releases)
