@@ -2,12 +2,13 @@ name        = "pilot"
 version     = "0.1.0"
 description = "A Frappe/Pilot golden: a working Pilot admin console + a Frappe site."
 base_image  = "ubuntu-24.04"
-modes       = ["cold"]
+modes       = ["cold", "warm", "both"]   # `both` = one VM, cold image + warm signup snapshot
 tags        = ["frappe", "pilot"]
 
 [phases]
-build  = "recipe:build"
-verify = "recipe:verify"
+build    = "recipe:build"
+verify   = "recipe:verify"
+warm_arm = "recipe:warm_arm"             # prime the site before the warm capture (both/warm bakes)
 
 [size]
 vcpus = 2
@@ -40,9 +41,14 @@ repo = "frappe/pilot"                   # the pilot release baked in; pin it via
                                         # Releases page / `chef releases set frappe/pilot <tag>`.
 
 [[publish]]
-type = "atlas-base-image"
+type = "atlas-base-image"               # the SERVER golden: promote a cold base image `create_vm` boots
 name = "pilot-chef"
 distribute = true                       # after promoting on the build host, fan out to the rest of the fleet host-to-host (no S3)
+register_user_image = true              # wire it as Atlas default_user_image so servers boot it out of the box
+
+[[publish]]
+type = "atlas-bench-snapshot"           # the SIGNUP golden: register the cold snapshot a self-serve Site clones
+                                        # (default_bench_snapshot). A `both` bake's warm snapshot is auto-discovered.
 
 [[publish]]
 type = "local"
