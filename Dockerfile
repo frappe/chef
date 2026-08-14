@@ -6,9 +6,11 @@ ENV PYTHONUNBUFFERED=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
 # curl is handy for container healthchecks / debugging; git backs release resolution
-# (chef.releases uses `git ls-remote`); uv does the install.
+# (chef.releases uses `git ls-remote`); openssh-client is REQUIRED by the atlas builder,
+# which reaches a build VM's guest by shelling out to `ssh` through a ProxyJump host
+# (chef.builders.atlas); uv does the install.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends curl git \
+    && apt-get install -y --no-install-recommends curl git openssh-client \
     && rm -rf /var/lib/apt/lists/* \
     && pip install --no-cache-dir uv
 
