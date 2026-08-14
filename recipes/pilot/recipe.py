@@ -53,8 +53,14 @@ mkdir -p "$PILOT_DIR"
 tmp="$(mktemp)"
 curl -fsSL --proto '=https' --tlsv1.2 "{tarball}" -o "$tmp"
 tar -xzf "$tmp" -C "$PILOT_DIR"
-rm -f "$tmp" "$PILOT_DIR/bench"
+rm -f "$tmp"
 chmod +x "$PILOT_DIR/bin/pilot"
+# Atlas's in-guest deploy-site.py drives the baked bench as `$HOME/pilot/bench -b <bench> …`
+# (rename-site / setup production / frappe browse — all present on the pilot CLI). The
+# release tarball ships a stale top-level `bench`; replace it with a symlink to the real
+# entrypoint so a self-serve Site can deploy onto this golden (else: "bench-cli not found
+# at /home/frappe/pilot/bench; this VM was not baked from the golden image").
+ln -sf bin/pilot "$PILOT_DIR/bench"
 # --- uv (mirrors install.sh ensure_uv)
 command -v uv >/dev/null 2>&1 || curl -LsSf https://astral.sh/uv/install.sh | sh
 export PATH="$HOME/.local/bin:$PILOT_DIR/bin:$PATH"
