@@ -77,6 +77,7 @@ class FakeBuilder(Builder):
     def __init__(self):
         self.released = False
         self.stopped = False
+        self.lifecycle = []  # ordered lifecycle calls
 
     def acquire(self, base_image, size, *, title):
         assert isinstance(size, BuildSize)
@@ -84,8 +85,16 @@ class FakeBuilder(Builder):
 
     def stop(self, target):
         self.stopped = True
+        self.lifecycle.append("stop")
+
+    def start(self, target):
+        self.lifecycle.append("start")
+
+    def wait_ready(self, target):
+        self.lifecycle.append("wait_ready")
 
     def snapshot(self, target, kind, *, title):
+        self.lifecycle.append(f"snapshot:{SnapshotKind(kind).value}")
         return SnapshotRef(kind=SnapshotKind(kind), ref=f"/fake/{kind}.tar", size_bytes=42)
 
     def release(self, target):
@@ -158,6 +167,26 @@ def test_bake_inline_succeeds(chef_env, monkeypatch):
     done = [e for e in events if e["type"] == "done"]
     assert done and done[-1]["exit_code"] == 0
     assert done[-1]["status"] == "succeeded"
+
+
+def test_bake_both_waits_ready_after_start(chef_env, monkeypatch):
+    """mode=both: the warm capture must wait for the restarted guest before warm_arm — else
+    pyinfra races the reboot ('No hosts remaining'). Assert start → wait_ready → warm snapshot."""
+    fake_builder = FakeBuilder()
+    fake_publisher = FakePublisher()
+    monkeypatch.setattr(bake_job, "get_builder", lambda name: fake_builder)
+    monkeypatch.setattr(bake_job, "get_publisher", lambda type: fake_publisher)
+    monkeypatch.setattr(bake_job, "run_phase", _fake_run_phase)
+
+    store.create_bake(
+        store.BakeRecord(id="bake-both", recipe="hello", mode="both", builder="fake", inputs={})
+    )
+    events = bake_job.run_bake_inline("bake-both")
+
+    assert store.get_bake("bake-both").status == "succeeded"
+    lc = fake_builder.lifecycle
+    # cold first (stop → cold snapshot), then warm (start → WAIT → warm snapshot)
+    assert lc == ["stop", "snapshot:cold", "start", "wait_ready", "snapshot:warm"]
     # and carried the status transitions
     statuses = [e["status"] for e in events if e["type"] == "status"]
     assert "acquiring" in statuses

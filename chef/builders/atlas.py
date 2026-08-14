@@ -126,6 +126,15 @@ class AtlasBuilder(Builder):
     def start(self, target: SshTarget) -> None:
         self.client.start_vm(target.vm_ref)
 
+    def wait_ready(self, target: SshTarget) -> None:
+        """After a start(), block until the VM is Running AND answers SSH again — the same
+        readiness gate acquire() uses. Without it the warm_arm phase races the reboot and
+        pyinfra reports ``No hosts remaining`` (the guest's sshd/route isn't back yet)."""
+        self._poll_vm_running(target.vm_ref)
+        config_path = target.ssh_config_file
+        if config_path:
+            self._wait_ssh_ready(Path(config_path), target.vm_ref)
+
     def snapshot(self, target: SshTarget, kind: SnapshotKind, *, title: str) -> SnapshotRef:
         kind = SnapshotKind(kind)
         if kind is SnapshotKind.warm:

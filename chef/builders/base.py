@@ -49,6 +49,12 @@ class Builder(ABC):
     def start(self, target: SshTarget) -> None:  # noqa: B027 - intentional no-op default
         """Start the VM before a warm capture. Override where the backend needs it."""
 
+    def wait_ready(self, target: SshTarget) -> None:  # noqa: B027 - intentional no-op default
+        """Block until the target is reachable again after a :meth:`start`. A real VM boots
+        asynchronously, so ``start`` returning does NOT mean the guest answers SSH yet — the
+        warm_arm phase (and any post-start work) would otherwise race the reboot and fail with
+        pyinfra's ``No hosts remaining``. No-op for stateless backends that never restart."""
+
     def host_signature(self, target: SshTarget) -> HostSignature | None:
         """The capturing host's CPU/kernel/Firecracker signature, for warm cross-host
         placement. ``None`` when the backend has no meaningful host family."""
