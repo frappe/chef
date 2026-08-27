@@ -8,6 +8,7 @@ even the HTTP layer never leaves the process.
 
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -212,11 +213,43 @@ def test_acquire_fails_loud_on_terminal_vm_state(keypair, ssh_ok):
     assert "Failed" in str(exc.value)
 
 
-def test_acquire_missing_public_key_raises(tmp_path, ssh_ok):
+def test_acquire_derives_public_key_when_pub_absent(tmp_path, monkeypatch):
+    """No .pub sibling: the builder derives the public half from the private key
+    via `ssh-keygen -y` and registers THAT on the scratch VM."""
+    # A real ed25519 keypair, then drop the .pub so only the private half remains.
+    key = tmp_path / "id_ed25519"
+    subprocess.run(["ssh-keygen", "-t", "ed25519", "-N", "", "-q", "-f", str(key)], check=True)
+    derived = subprocess.run(
+        ["ssh-keygen", "-y", "-f", str(key)], capture_output=True, text=True
+    ).stdout.strip()
+    (tmp_path / "id_ed25519.pub").unlink()
+
+    # Let the real ssh-keygen derivation run; stub only the ssh readiness probe.
+    orig_run = atlas_builder_mod.subprocess.run
+
+    def run(cmd, *a, **k):
+        if isinstance(cmd, list | tuple) and cmd[:1] == ["ssh-keygen"]:
+            return orig_run(cmd, *a, **k)
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(atlas_builder_mod.subprocess, "run", run)
+
+    client = FakeAtlasClient()
+    AtlasBuilder(client=client, ssh_key_file=str(key), ready_timeout=5, poll_interval=0).acquire(
+        "frappe-base", BuildSize(), title="t"
+    )
+    assert derived.startswith("ssh-ed25519 ")
+    assert client.call_kwargs("create_bare_vm")["ssh_public_key"] == derived
+
+
+def test_acquire_raises_when_pub_absent_and_derivation_fails(tmp_path):
+    """No .pub sibling AND the private key can't yield one (garbage bytes):
+    `ssh-keygen -y` fails, so the builder raises rather than booting a VM with
+    no authorized key."""
     from chef.builders import BuilderError
 
     key = tmp_path / "id"
-    key.write_text("priv")  # no .pub alongside it
+    key.write_text("not-a-real-private-key")  # no .pub; ssh-keygen -y will fail
     with pytest.raises(BuilderError):
         AtlasBuilder(client=FakeAtlasClient(), ssh_key_file=str(key)).acquire(
             "frappe-base", BuildSize(), title="t"

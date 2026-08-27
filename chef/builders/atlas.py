@@ -180,9 +180,23 @@ class AtlasBuilder(Builder):
                 "must be registered in Atlas service_public_keys)"
             )
         pub_path = Path(f"{self.ssh_key_file}.pub")
-        if not pub_path.is_file():
-            raise BuilderError(f"atlas ssh public key not found at {pub_path}")
-        return pub_path.read_text().strip()
+        if pub_path.is_file():
+            return pub_path.read_text().strip()
+        # No .pub sibling: derive the public half from the private key. Only the
+        # private key is strictly required to connect; the public key is what Atlas
+        # registers as an authorized key on the scratch VM, and `ssh-keygen -y`
+        # recomputes it deterministically from the private key.
+        result = subprocess.run(
+            ["ssh-keygen", "-y", "-f", self.ssh_key_file],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0 or not result.stdout.strip():
+            raise BuilderError(
+                f"atlas ssh public key not found at {pub_path} and could not be derived "
+                f"from {self.ssh_key_file} via `ssh-keygen -y`: {result.stderr.strip()}"
+            )
+        return result.stdout.strip()
 
     def _write_ssh_config(self, config_dir: Path, guest_ipv6: str, server_ipv4: str) -> Path:
         # The ProxyJump host needs the SAME relaxed host-key handling as the guest — give it
